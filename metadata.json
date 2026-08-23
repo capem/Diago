@@ -1,0 +1,6 @@
+{
+  "name": "Diagonal Chess",
+  "description": "Tactical 7×7 45° rotated diamond chess strategy game with 10 pieces per player and 6 one-time superpowers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -21,6 +21,7 @@ import com.example.audio.SoundManager
 import com.example.model.AiDifficulty
 import com.example.model.BoardTheme
 import com.example.model.GameMode
+import com.example.model.PlayerSide
 import com.example.model.TimeControl
 import com.example.ui.screens.GameScreen
 import com.example.ui.screens.HomeScreen
@@ -32,7 +33,9 @@ sealed class AppScreen {
     data class Game(
         val mode: GameMode,
         val difficulty: AiDifficulty?,
-        val timeControl: TimeControl = TimeControl.UNLIMITED
+        val timeControl: TimeControl = TimeControl.UNLIMITED,
+        val playerSide: PlayerSide = PlayerSide.WHITE,
+        val rulesConfig: com.example.model.GameRulesConfig = com.example.model.GameRulesConfig()
     ) : AppScreen()
     data object Codex : AppScreen()
 }
@@ -80,7 +83,7 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                     onThemeChange = { currentTheme = it },
                     isAudioMuted = isAudioMuted,
                     onToggleAudio = { isAudioMuted = soundManager.toggleMute() },
-                    onStartGame = { mode, diff, tc -> currentScreen = AppScreen.Game(mode, diff, tc) },
+                    onStartGame = { mode, diff, tc, side, rules -> currentScreen = AppScreen.Game(mode, diff, tc, side, rules) },
                     onOpenCodex = { currentScreen = AppScreen.Codex }
                 )
             }
@@ -91,6 +94,8 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                     gameMode = screen.mode,
                     aiDifficulty = screen.difficulty,
                     timeControl = screen.timeControl,
+                    playerSide = screen.playerSide,
+                    rulesConfig = screen.rulesConfig,
                     theme = currentTheme,
                     soundManager = soundManager,
                     onBackToHome = { currentScreen = AppScreen.Home }

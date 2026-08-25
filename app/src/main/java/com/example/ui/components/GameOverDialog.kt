@@ -45,20 +45,36 @@ fun GameOverDialog(
     onRematch: () -> Unit,
     onHome: () -> Unit
 ) {
+    val isDraw = status.isDraw
     val isWhiteWinner = status.isWhiteWin
     val winnerName = if (isWhiteWinner) "White" else "Black"
-    val winnerColor = if (isWhiteWinner) Color(0xFFFFD700) else Color(0xFF00E5FF)
-    val subtitleText = when {
-        status.isTimeout -> "Victorious on Time! ⏱️ Opponent ran out of clock."
-        status == GameStatus.DRAW -> "Stalemate / Draw! No remaining legal moves."
-        else -> "Checkmate by Elimination & Board Domination"
+    val bannerColor = when {
+        isDraw -> Color(0xFF00E5FF)
+        isWhiteWinner -> Color(0xFFFFD700)
+        else -> Color(0xFFB388FF)
+    }
+
+    val titleText = when (status) {
+        GameStatus.DRAW_STALEMATE -> "Stalemate!"
+        GameStatus.DRAW_REPETITION -> "Threefold Repetition!"
+        GameStatus.DRAW_AGREEMENT, GameStatus.DRAW -> "Game Drawn!"
+        else -> "$winnerName Wins!"
+    }
+
+    val subtitleText = when (status) {
+        GameStatus.DRAW_STALEMATE -> "🤝 Stalemate: Player has no legal moves remaining. Game is drawn."
+        GameStatus.DRAW_REPETITION -> "🔁 Draw: The exact same board position was reached 3 times."
+        GameStatus.DRAW_AGREEMENT -> "🤝 Draw by mutual agreement."
+        GameStatus.DRAW -> "🤝 Game drawn."
+        GameStatus.WHITE_WON_TIMEOUT, GameStatus.BLACK_WON_TIMEOUT -> "Victorious on Time! ⏱️ Opponent ran out of clock."
+        else -> "Victory by Board Domination & Piece Elimination!"
     }
 
     Dialog(onDismissRequest = { /* Modal */ }) {
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = Color(0xFF161226),
-            border = androidx.compose.foundation.BorderStroke(2.dp, winnerColor),
+            border = androidx.compose.foundation.BorderStroke(2.dp, bannerColor),
             modifier = Modifier.fillMaxWidth().testTag("game_over_dialog")
         ) {
             Column(
@@ -67,21 +83,21 @@ fun GameOverDialog(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Trophy Crown Banner
+                // Trophy / Handshake Crown Banner
                 Box(
                     modifier = Modifier
                         .size(72.dp)
                         .clip(CircleShape)
                         .background(
-                            Brush.radialGradient(listOf(winnerColor.copy(alpha = 0.4f), Color.Transparent))
+                            Brush.radialGradient(listOf(bannerColor.copy(alpha = 0.4f), Color.Transparent))
                         )
-                        .border(2.dp, winnerColor, CircleShape),
+                        .border(2.dp, bannerColor, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.EmojiEvents,
-                        contentDescription = "Trophy",
-                        tint = winnerColor,
+                        contentDescription = "Game Over Status",
+                        tint = bannerColor,
                         modifier = Modifier.size(40.dp)
                     )
                 }
@@ -89,19 +105,20 @@ fun GameOverDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = if (status == GameStatus.DRAW) "Draw Game!" else "$winnerName Wins!",
+                    text = titleText,
                     color = Color.White,
-                    fontSize = 26.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
                 )
 
                 Text(
                     text = subtitleText,
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = Color.White.copy(alpha = 0.8f),
                     fontSize = 12.sp,
+                    lineHeight = 17.sp,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 6.dp)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -119,7 +136,7 @@ fun GameOverDialog(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = "$moveCount",
-                                color = winnerColor,
+                                color = bannerColor,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -168,7 +185,7 @@ fun GameOverDialog(
                         modifier = Modifier.weight(1f).testTag("dialog_rematch_btn"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = winnerColor,
+                            containerColor = bannerColor,
                             contentColor = Color.Black
                         )
                     ) {

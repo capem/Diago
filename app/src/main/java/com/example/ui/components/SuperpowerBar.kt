@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.engine.GameEngine
 import com.example.engine.GameState
 import com.example.model.PlayerSide
 import com.example.model.Superpower
@@ -372,18 +373,19 @@ fun SuperpowerBar(
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 Superpower.entries.forEach { power ->
-                    val isAvailable = remainingPowers.contains(power)
+                    val isPowerInRemaining = remainingPowers.contains(power)
                     val isActive = state.activePower == power && isCurrentTurn
-                    val isPawnWithEmptyGraveyard = power == Superpower.PAWN && graveyard.isEmpty()
+                    val isPawnReviveValid = power != Superpower.PAWN || GameEngine.canRevivePawn(state, player)
+                    val isPowerReady = isPowerInRemaining && (power != Superpower.PAWN || isPawnReviveValid)
 
                     CompactPowerBadgeItem(
                         power = power,
-                        isAvailable = isAvailable && !isPawnWithEmptyGraveyard,
-                        isUsed = !isAvailable,
+                        isAvailable = isPowerReady,
+                        isUsed = !isPowerInRemaining,
                         isActive = isActive,
                         isCurrentTurn = isCurrentTurn,
                         onClick = {
-                            if (isAvailable && isCurrentTurn) {
+                            if (isPowerInRemaining && isCurrentTurn) {
                                 onPowerClick(power)
                             } else {
                                 onShowPowerInfo(power)

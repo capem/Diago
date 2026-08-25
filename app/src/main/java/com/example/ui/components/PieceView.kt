@@ -49,7 +49,7 @@ fun PieceView(
         modifier = modifier.size(60.dp),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(3.dp)) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
             val center = Offset(size.width / 2f, size.height / 2f)
             val radius = size.minDimension / 2f - 2.dp.toPx()
 
@@ -57,36 +57,48 @@ fun PieceView(
             if (isSelected) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFFFFD700).copy(alpha = 0.65f), Color.Transparent),
+                        colors = listOf(Color(0xFFFFD700).copy(alpha = 0.75f), Color(0xFFFF9100).copy(alpha = 0.35f), Color.Transparent),
                         center = center,
-                        radius = radius * 1.45f * pulseGlow
+                        radius = radius * 1.5f * pulseGlow
                     ),
-                    radius = radius * 1.35f,
+                    radius = radius * 1.4f,
                     center = center
                 )
             }
 
-            // 2. Drop Shadow for 3D Checker piece
+            // 2. High-Contrast Outer Drop Shadow
             drawCircle(
-                color = Color.Black.copy(alpha = 0.45f),
+                color = Color.Black.copy(alpha = 0.65f),
                 radius = radius,
-                center = Offset(center.x, center.y + 4.dp.toPx())
+                center = Offset(center.x, center.y + 3.5.dp.toPx())
             )
 
-            // 3. Base Checker Gradient (Ivory White or Obsidian Black)
+            // 3. High-Contrast Outer Boundary Ring (Ensures White pieces pop on light tiles & Black pieces pop on dark tiles)
+            val outerBoundaryColor = if (isWhite) {
+                Color(0xFF2E241A) // Strong dark boundary for white piece
+            } else {
+                Color(0xFFDED6F2) // Crisp luminous light-silver boundary for black piece
+            }
+            drawCircle(
+                color = outerBoundaryColor,
+                radius = radius + 0.8.dp.toPx(),
+                center = center
+            )
+
+            // 4. Base Checker Gradient (Pure Ivory Porcelain vs Midnight Obsidian)
             val baseColors = if (isWhite) {
                 listOf(
                     Color(0xFFFFFFFF),
-                    Color(0xFFF5EBE1),
-                    Color(0xFFD6C3B2),
-                    Color(0xFF8F7662)
+                    Color(0xFFFAF4ED),
+                    Color(0xFFEBE0D0),
+                    Color(0xFFB59F89)
                 )
             } else {
                 listOf(
-                    Color(0xFF4A4458),
-                    Color(0xFF2A2338),
-                    Color(0xFF140F20),
-                    Color(0xFF07040C)
+                    Color(0xFF3C3549),
+                    Color(0xFF201A2C),
+                    Color(0xFF110C1C),
+                    Color(0xFF06030B)
                 )
             }
 
@@ -94,22 +106,50 @@ fun PieceView(
                 brush = Brush.radialGradient(
                     colors = baseColors,
                     center = Offset(center.x - radius * 0.3f, center.y - radius * 0.35f),
-                    radius = radius * 1.1f
+                    radius = radius * 1.15f
                 ),
                 radius = radius,
                 center = center
             )
 
-            // 4. Outer Rim Groove
-            drawCircle(
-                color = if (isWhite) Color(0xFFC7B19C) else Color(0xFF5A4D73),
-                radius = radius * 0.88f,
-                center = center,
-                style = Stroke(width = 1.8.dp.toPx())
-            )
+            // 5. Queen Royal Tiara Ring or Regular Checker Rim
+            if (piece.isQueen) {
+                // Royal Queen Golden Outer Ring
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = if (isWhite) {
+                            listOf(Color(0xFFFFDF7A), Color(0xFFD4A017), Color(0xFF8B6508))
+                        } else {
+                            listOf(Color(0xFFFFF099), Color(0xFFFFD700), Color(0xFFFF9100))
+                        },
+                        center = center,
+                        radius = radius * 0.95f
+                    ),
+                    radius = radius * 0.88f,
+                    center = center,
+                    style = Stroke(width = 2.4.dp.toPx())
+                )
 
-            // 5. Inner Concentric Ring (Checker motif)
-            val innerRingColor = if (isWhite) Color(0xFFDCC8B4) else Color(0xFF221B30)
+                // 4 Royal Tiara Jewel Pips at 0, 90, 180, 270 deg
+                val jewelRadius = radius * 0.88f
+                val jewelPipSize = 2.2.dp.toPx()
+                val jewelColor = if (isWhite) Color(0xFF684805) else Color(0xFFFFE57F)
+                drawCircle(color = jewelColor, radius = jewelPipSize, center = Offset(center.x, center.y - jewelRadius))
+                drawCircle(color = jewelColor, radius = jewelPipSize, center = Offset(center.x, center.y + jewelRadius))
+                drawCircle(color = jewelColor, radius = jewelPipSize, center = Offset(center.x - jewelRadius, center.y))
+                drawCircle(color = jewelColor, radius = jewelPipSize, center = Offset(center.x + jewelRadius, center.y))
+            } else {
+                // Regular Outer Rim Groove
+                drawCircle(
+                    color = if (isWhite) Color(0xFF9E846E) else Color(0xFF7A6899),
+                    radius = radius * 0.88f,
+                    center = center,
+                    style = Stroke(width = 1.6.dp.toPx())
+                )
+            }
+
+            // 6. Inner Concentric Ring
+            val innerRingColor = if (isWhite) Color(0xFFD4C2B0) else Color(0xFF282038)
             drawCircle(
                 color = innerRingColor,
                 radius = radius * 0.65f,
@@ -117,51 +157,101 @@ fun PieceView(
             )
 
             drawCircle(
-                color = if (isWhite) Color(0xFFB89F88) else Color(0xFF6B588B),
+                color = if (isWhite) Color(0xFF8F7762) else Color(0xFF8A73AC),
                 radius = radius * 0.65f,
                 center = center,
-                style = Stroke(width = 1.5.dp.toPx())
+                style = Stroke(width = 1.4.dp.toPx())
             )
 
-            // 6. Center Bullseye Core
-            val coreColor = if (isWhite) Color(0xFFF2E6D8) else Color(0xFF181324)
-            drawCircle(
-                color = coreColor,
-                radius = radius * 0.38f,
-                center = center
-            )
+            // 7. Center Bullseye Core / Queen Throne Medallion
+            if (piece.isQueen) {
+                // High contrast medallion disk behind the Queen Crown
+                val medallionBg = if (isWhite) {
+                    Color(0xFFF9F1E6) // Bright ivory medallion disk
+                } else {
+                    Color(0xFF130E20) // Deep obsidian medallion disk
+                }
+                drawCircle(
+                    color = medallionBg,
+                    radius = radius * 0.44f,
+                    center = center
+                )
+                // Gold ring around the center crown medallion
+                drawCircle(
+                    color = if (isWhite) Color(0xFFC4931E) else Color(0xFFFFD700),
+                    radius = radius * 0.44f,
+                    center = center,
+                    style = Stroke(width = 1.5.dp.toPx())
+                )
+            } else {
+                val coreColor = if (isWhite) Color(0xFFEBE0D2) else Color(0xFF1B1527)
+                drawCircle(
+                    color = coreColor,
+                    radius = radius * 0.38f,
+                    center = center
+                )
+            }
 
-            // 7. Subtle top specular highlight
+            // 8. Top Specular Glaze Highlight
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color.White.copy(alpha = if (isWhite) 0.5f else 0.25f), Color.Transparent),
+                    colors = listOf(Color.White.copy(alpha = if (isWhite) 0.6f else 0.35f), Color.Transparent),
                     center = Offset(center.x - radius * 0.28f, center.y - radius * 0.32f),
                     radius = radius * 0.55f
                 ),
-                radius = radius * 0.5f,
+                radius = radius * 0.48f,
                 center = Offset(center.x - radius * 0.28f, center.y - radius * 0.32f)
             )
 
-            // 8. Revived piece badge border if applicable
+            // 9. Revived piece emerald badge border if applicable
             if (piece.isRevived) {
                 drawCircle(
                     color = Color(0xFF00E676),
                     radius = radius * 0.98f,
                     center = center,
-                    style = Stroke(width = 2.dp.toPx())
+                    style = Stroke(width = 2.4.dp.toPx())
                 )
             }
         }
 
-        // 9. Queen Crown Insignia
+        // 10. Queen Crown Insignia with sharp White vs Black color coding
         if (piece.isQueen) {
-            Text(
-                text = "♛",
-                color = if (isWhite) Color(0xFF996515) else Color(0xFFFFD700),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Center)
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (isWhite) {
+                    // White Queen: Deep Regal Gold Crown with dark contrast shadow on bright ivory body
+                    Text(
+                        text = "♛",
+                        color = Color(0xFF261904).copy(alpha = 0.55f),
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(top = 1.dp, start = 1.dp)
+                    )
+                    Text(
+                        text = "♛",
+                        color = Color(0xFFB8860B), // Dark Goldenrod
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                } else {
+                    // Black Queen: Radiant Luminous 24K Gold Crown on deep obsidian body
+                    Text(
+                        text = "♛",
+                        color = Color.Black.copy(alpha = 0.8f),
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(top = 1.5.dp)
+                    )
+                    Text(
+                        text = "♛",
+                        color = Color(0xFFFFD700), // Vibrant 24K Gold
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
         }
     }
 }

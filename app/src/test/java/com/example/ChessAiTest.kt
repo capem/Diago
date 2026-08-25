@@ -121,4 +121,64 @@ class ChessAiTest {
         assertEquals(0, stateAfterMove2.kingMoveCount)
         assertEquals(PlayerSide.WHITE, stateAfterMove2.currentTurn)
     }
+
+    @Test
+    fun testAiReviveLogicDuringCaptureWindow() {
+        val capturedBlackQueen = Piece("b_queen", PlayerSide.BLACK, isQueen = true, capturedAt = Position(3, 3))
+        val whiteCaptureMove = com.example.model.Move(
+            from = Position(2, 3),
+            to = Position(6, 6),
+            piece = Piece("w1", PlayerSide.WHITE),
+            capturedPiece = capturedBlackQueen,
+            capturedPos = Position(3, 3)
+        )
+        val state = GameState(
+            board = mapOf(Position(1, 1) to Piece("b1", PlayerSide.BLACK), Position(6, 6) to Piece("w1", PlayerSide.WHITE)),
+            currentTurn = PlayerSide.BLACK,
+            blackGraveyard = listOf(capturedBlackQueen),
+            moveHistory = listOf(whiteCaptureMove),
+            blackPowers = setOf(Superpower.PAWN)
+        )
+
+        assertTrue(GameEngine.canRevivePawn(state, PlayerSide.BLACK))
+        val decision = ChessAi.computeNextMove(state, AiDifficulty.GRANDMASTER)
+        assertNotNull(decision)
+        assertTrue("AI should select RevivePawn when Queen was captured", decision is AiDecision.RevivePawn)
+        assertEquals(Position(3, 3), (decision as AiDecision.RevivePawn).pos)
+    }
+
+    @Test
+    fun testAiConsidersLossPieceThresholdForDecisiveWin() {
+        // Rules config: loss threshold = 1. Opponent has 2 pieces. Capturing 1 piece drops opponent to 1 piece -> Instant Win!
+        val config = com.example.model.GameRulesConfig(lossPieceThreshold = 1)
+        val customBoard = mapOf(
+            Position(2, 2) to Piece("b1", PlayerSide.BLACK),
+            Position(3, 2) to Piece("w1", PlayerSide.WHITE),
+            Position(6, 0) to Piece("w2", PlayerSide.WHITE)
+        )
+        val state = GameState(
+            board = customBoard,
+            currentTurn = PlayerSide.BLACK,
+            rulesConfig = config
+        )
+
+        val decision = ChessAi.computeNextMove(state, AiDifficulty.GRANDMASTER)
+        assertNotNull(decision)
+        assertTrue(decision is AiDecision.RegularMove)
+        val move = (decision as AiDecision.RegularMove).move
+        assertEquals(Position(2, 2), move.from)
+        assertEquals(Position(4, 2), move.to)
+        assertEquals("w1", move.capturedPiece?.id)
+    }
+
+    @Test
+    fun testAiQueeningDistanceThresholdCalculation() {
+        // With threshold = 0 (only apex promotes), distance from (2, 3) for White to (0,0) is 2 + 3 = 5
+        val distApex = ChessAi.getDistanceToPromotionGoal(Position(2, 3), PlayerSide.WHITE, threshold = 0)
+        assertEquals(5, distApex)
+
+        // With threshold = 6 (full border promotes), distance from (2, 3) for White is min(2, 3) = 2
+        val distFull = ChessAi.getDistanceToPromotionGoal(Position(2, 3), PlayerSide.WHITE, threshold = 6)
+        assertEquals(2, distFull)
+    }
 }

@@ -149,8 +149,15 @@ fun RulesCodexScreen(
                 // Section 7: Important Rule
                 RuleCard(
                     number = "7",
-                    title = "Core Philosophy",
-                    content = "The physical pieces remain identical checker/dame pieces throughout the entire match. The names King, Queen, Rook, Bishop, Knight, and Pawn refer exclusively to the six strategic abilities."
+                    title = "Draw & Stalemate Conditions",
+                    content = "• Stalemate: If a player on their turn has no legal moves remaining (and is not in a winning position), the game concludes in a Stalemate (Draw).\n• Threefold Repetition: If the exact same board position and player turn repeats 3 times in a match, the game is declared a Draw by Repetition.\n• Timeouts: If playing with a clock and a player runs out of time, their opponent wins on time."
+                )
+
+                // Section 8: Board Orientation
+                RuleCard(
+                    number = "8",
+                    title = "Board Perspective & Full Space View",
+                    content = "• 45° Diamond Arena: The classic isometric diamond chess perspective.\n• 0° Grid (Max Space): Straight orthogonal grid view that expands tiles by ~41% to utilize 100% of your screen's width and height.\n• Toggle between 45° and 0° anytime during a match via the top header or options menu."
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -80,6 +81,8 @@ import com.example.ui.components.BoardView
 import com.example.ui.components.EvaluationBar
 import com.example.ui.components.GameOverDialog
 import com.example.ui.components.GraveyardModalDialog
+import com.example.ui.components.MatchRulesDialog
+import com.example.ui.components.PawnReviveConfirmDialog
 import com.example.ui.components.PowerDetailDialog
 import com.example.ui.components.SuperpowerBar
 import com.example.ui.components.TimeControlDialog
@@ -91,26 +94,32 @@ fun GameScreen(
     gameMode: GameMode,
     aiDifficulty: AiDifficulty?,
     timeControl: TimeControl = TimeControl.UNLIMITED,
+    playerSide: PlayerSide = PlayerSide.WHITE,
+    rulesConfig: com.example.model.GameRulesConfig = com.example.model.GameRulesConfig(),
     theme: BoardTheme,
     soundManager: SoundManager,
     onBackToHome: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var currentRulesConfig by remember { mutableStateOf(rulesConfig) }
     var currentTimeControl by remember { mutableStateOf(timeControl) }
     var whiteTimeMillis by remember(currentTimeControl) { mutableLongStateOf(currentTimeControl.totalSeconds * 1000L) }
     var blackTimeMillis by remember(currentTimeControl) { mutableLongStateOf(currentTimeControl.totalSeconds * 1000L) }
     var isTimerPaused by remember { mutableStateOf(false) }
     var showTimeControlDialog by remember { mutableStateOf(false) }
 
-    var state by remember { mutableStateOf(GameState()) }
+    var state by remember { mutableStateOf(GameState(rulesConfig = currentRulesConfig)) }
     var historyStates by remember { mutableStateOf(listOf<GameState>()) }
-    var isFlipped by remember { mutableStateOf(false) }
+    var isFlipped by remember { mutableStateOf(playerSide == PlayerSide.BLACK) }
+    var boardAngle by remember { mutableStateOf(com.example.model.BoardAngle.DIAMOND_45) }
     var detailPowerInfo by remember { mutableStateOf<Pair<Superpower, PlayerSide>?>(null) }
+    var pendingPawnRevive by remember { mutableStateOf<Triple<Piece, Position, PlayerSide>?>(null) }
     var isAiThinking by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(soundManager.isAudioMuted()) }
     var showGraveyardModal by remember { mutableStateOf(false) }
     var showEvalBar by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var showRulesDialog by remember { mutableStateOf(false) }
 
     fun applyIncrement(player: PlayerSide) {
         if (currentTimeControl.incrementSeconds > 0) {
@@ -153,9 +162,55 @@ fun GameScreen(
     fun activatePower(power: Superpower, player: PlayerSide = state.currentTurn) {
         if (state.isGameOver() || isAiThinking || isTimerPaused) return
         if (player != state.currentTurn) return
-        if (gameMode == GameMode.AI && state.currentTurn == PlayerSide.BLACK) return
+        if (gameMode == GameMode.AI && state.currentTurn != playerSide) return
         val remaining = state.remainingPowers(player)
         if (!remaining.contains(power)) return
+
+        if (power == Superpower.PAWN) {
+            if (!GameEngine.canRevivePawn(state, player)) {
+                val graveyard = state.graveyard(player)
+                state = state.copy(
+                    announcement = if (graveyard.isEmpty()) "⚠️ No captured pieces to revive!"
+                    else "⚠️ Pawn revival expired! You can only revive on the immediate turn after capture."
+                )
+                return
+            }
+
+            val graveyard = state.graveyard(player)
+            val lastCaptured = graveyard.last()
+            val exactPos = lastCaptured.capturedAt
+
+            if (exactPos != null && !state.board.containsKey(exactPos)) {
+                // Open confirmation dialog protecting against accidental misclick!
+                pendingPawnRevive = Triple(lastCaptured, exactPos, player)
+            } else {
+                val reviveSpots = GameEngine.getReviveDestinations(state, player)
+                if (reviveSpots.isEmpty()) {
+                    state = state.copy(announcement = "⚠️ No available open squares to revive piece!")
+                } else {
+                    val candidateReviveMoves = reviveSpots.map { dest ->
+                        Move(
+                            from = dest,
+                            to = dest,
+                            piece = lastCaptured,
+                            superpowerUsed = Superpower.PAWN,
+                            isRevival = true
+                        )
+                    }
+                    state = state.copy(
+                        isRevivingPawnMode = true,
+                        activePower = Superpower.PAWN,
+                        selectedPos = null,
+                        candidateMoves = candidateReviveMoves,
+                        announcement = if (exactPos != null)
+                            "⚠️ Original square ${exactPos.notation()} occupied! Tap an emerald square to choose revival spot."
+                        else
+                            "♟ Pawn Activated: Tap an emerald square to choose revival spot."
+                    )
+                }
+            }
+            return
+        }
 
         soundManager.playPowerSound()
 
@@ -206,47 +261,7 @@ fun GameScreen(
                 )
             }
             Superpower.PAWN -> {
-                // Revive last captured piece in its exact old place
-                val graveyard = state.graveyard(player)
-                if (graveyard.isEmpty()) {
-                    state = state.copy(announcement = "⚠️ No captured pieces to revive!")
-                } else {
-                    val lastCaptured = graveyard.last()
-                    val exactPos = lastCaptured.capturedAt
-                    if (exactPos != null && !state.board.containsKey(exactPos)) {
-                        // Instant revival in exact original position!
-                        val previousTurn = state.currentTurn
-                        historyStates = historyStates + state
-                        state = GameEngine.applyPawnRevival(state, exactPos)
-                        applyIncrement(previousTurn)
-                        soundManager.playPowerSound()
-                    } else {
-                        val reviveSpots = GameEngine.getReviveDestinations(state, player)
-                        if (reviveSpots.isEmpty()) {
-                            state = state.copy(announcement = "⚠️ No available open squares to revive piece!")
-                        } else {
-                            val candidateReviveMoves = reviveSpots.map { dest ->
-                                Move(
-                                    from = dest,
-                                    to = dest,
-                                    piece = lastCaptured,
-                                    superpowerUsed = Superpower.PAWN,
-                                    isRevival = true
-                                )
-                            }
-                            state = state.copy(
-                                isRevivingPawnMode = true,
-                                activePower = Superpower.PAWN,
-                                selectedPos = null,
-                                candidateMoves = candidateReviveMoves,
-                                announcement = if (exactPos != null)
-                                    "⚠️ Exact position ${exactPos.notation()} occupied! Tap an open square to place revived piece."
-                                else
-                                    "♟ Pawn Activated: Tap an emerald square to revive your piece!"
-                            )
-                        }
-                    }
-                }
+                // Handled above with misclick dialog
             }
         }
     }
@@ -266,7 +281,7 @@ fun GameScreen(
 
     // Reset match helper
     fun resetMatch(newTc: TimeControl = currentTimeControl) {
-        state = GameState()
+        state = GameState(rulesConfig = currentRulesConfig)
         historyStates = emptyList()
         currentTimeControl = newTc
         whiteTimeMillis = newTc.totalSeconds * 1000L
@@ -278,7 +293,7 @@ fun GameScreen(
     fun handleSquareClick(pos: Position) {
         if (state.isGameOver() || isAiThinking || isTimerPaused) return
         val currentTurn = state.currentTurn
-        if (gameMode == GameMode.AI && currentTurn == PlayerSide.BLACK) return
+        if (gameMode == GameMode.AI && currentTurn != playerSide) return
 
         // Multi-Jump continuation lock
         if (state.chainCapturePos != null) {
@@ -301,15 +316,15 @@ fun GameScreen(
             return
         }
 
-        // 2. Pawn Revive Placement Mode
+        // 2. Pawn Revive Placement Mode (Protected with confirmation dialog)
         if (state.isRevivingPawnMode) {
             if (!state.board.containsKey(pos)) {
                 val allowedReviveSpots = GameEngine.getReviveDestinations(state, currentTurn)
                 if (allowedReviveSpots.contains(pos)) {
-                    historyStates = historyStates + state
-                    state = GameEngine.applyPawnRevival(state, pos)
-                    applyIncrement(currentTurn)
-                    soundManager.playPowerSound()
+                    val lastCaptured = state.graveyard(currentTurn).lastOrNull()
+                    if (lastCaptured != null) {
+                        pendingPawnRevive = Triple(lastCaptured, pos, currentTurn)
+                    }
                 }
             }
             return
@@ -412,7 +427,8 @@ fun GameScreen(
 
     // AI Turn Coroutine
     LaunchedEffect(state.currentTurn, state.chainCapturePos, state.kingMoveCount, state.status, isTimerPaused) {
-        if (gameMode == GameMode.AI && state.currentTurn == PlayerSide.BLACK && state.status == GameStatus.PLAYING && !isTimerPaused) {
+        val aiSide = playerSide.opponent()
+        if (gameMode == GameMode.AI && state.currentTurn == aiSide && state.status == GameStatus.PLAYING && !isTimerPaused) {
             isAiThinking = true
             delay(if (state.chainCapturePos != null) 350 else 500) // Quick delay between combo jumps
             val decision = ChessAi.computeNextMove(state, aiDifficulty ?: AiDifficulty.TACTICIAN)
@@ -438,17 +454,21 @@ fun GameScreen(
                         soundManager.playQueenPromoteSound()
                         historyStates = historyStates + state
                         state = GameEngine.applyQueenTransformation(state, decision.pos)
-                        applyIncrement(PlayerSide.BLACK)
+                        applyIncrement(aiSide)
                     }
                     is AiDecision.RevivePawn -> {
                         soundManager.playPowerSound()
                         historyStates = historyStates + state
                         state = GameEngine.applyPawnRevival(state, decision.pos)
-                        applyIncrement(PlayerSide.BLACK)
+                        applyIncrement(aiSide)
                     }
                 }
             } else if (state.chainCapturePos != null) {
+                val prevTurn = state.currentTurn
                 state = GameEngine.finishMultiJump(state)
+                if (state.currentTurn != prevTurn) {
+                    applyIncrement(prevTurn)
+                }
             }
             isAiThinking = false
         }
@@ -567,6 +587,34 @@ fun GameScreen(
                         }
                     }
 
+                    // Board Rotation Angle Toggle Button (45° Diamond vs 0° Full Space Grid)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (boardAngle == com.example.model.BoardAngle.GRID_0) Color(0xFFFFD700).copy(alpha = 0.25f)
+                                else Color.White.copy(alpha = 0.08f)
+                            )
+                            .border(
+                                width = if (boardAngle == com.example.model.BoardAngle.GRID_0) 1.2.dp else 0.dp,
+                                color = if (boardAngle == com.example.model.BoardAngle.GRID_0) Color(0xFFFFD700) else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                boardAngle = if (boardAngle == com.example.model.BoardAngle.DIAMOND_45) com.example.model.BoardAngle.GRID_0 else com.example.model.BoardAngle.DIAMOND_45
+                            }
+                            .testTag("board_rotation_toggle"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (boardAngle == com.example.model.BoardAngle.DIAMOND_45) "45°" else "0°",
+                            color = if (boardAngle == com.example.model.BoardAngle.GRID_0) Color(0xFFFFD700) else Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
                     // Evaluation Bar Toggle Button (Vs User & Vs AI)
                     Box(
                         modifier = Modifier
@@ -678,6 +726,45 @@ fun GameScreen(
                                 }
                             )
 
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Rules Config (Loss & Queening)",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Tune, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showRulesDialog = true
+                                    showMoreMenu = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (boardAngle == com.example.model.BoardAngle.DIAMOND_45) "Board Rotation: 0° (Max Space)" else "Board Rotation: 45° (Diamond)",
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Text(
+                                        if (boardAngle == com.example.model.BoardAngle.DIAMOND_45) "□" else "◇",
+                                        color = Color(0xFFFFD700),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                onClick = {
+                                    boardAngle = if (boardAngle == com.example.model.BoardAngle.DIAMOND_45) com.example.model.BoardAngle.GRID_0 else com.example.model.BoardAngle.DIAMOND_45
+                                    showMoreMenu = false
+                                }
+                            )
+
                             if (gameMode == GameMode.PASS_AND_PLAY) {
                                 DropdownMenuItem(
                                     text = {
@@ -743,19 +830,24 @@ fun GameScreen(
                 }
             }
 
-            // Black's Superpower Bar (Visible at top, Right-side-up in vs AI mode, Mirrored only in Pass & Play)
+            val topPlayer = if (gameMode == GameMode.AI) playerSide.opponent() else (if (isFlipped) PlayerSide.WHITE else PlayerSide.BLACK)
+            val topTimeMillis = if (topPlayer == PlayerSide.WHITE) whiteTimeMillis else blackTimeMillis
+            val bottomPlayer = if (gameMode == GameMode.AI) playerSide else (if (isFlipped) PlayerSide.BLACK else PlayerSide.WHITE)
+            val bottomTimeMillis = if (bottomPlayer == PlayerSide.WHITE) whiteTimeMillis else blackTimeMillis
+
+            // Top Superpower Bar (Opponent in AI mode or Top player in Pass & Play)
             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                 SuperpowerBar(
                     state = state,
-                    player = PlayerSide.BLACK,
-                    isCurrentTurn = state.currentTurn == PlayerSide.BLACK,
-                    onPowerClick = { activatePower(it, PlayerSide.BLACK) },
+                    player = topPlayer,
+                    isCurrentTurn = state.currentTurn == topPlayer,
+                    onPowerClick = { activatePower(it, topPlayer) },
                     onCancelPower = { cancelActivePower() },
-                    onShowPowerInfo = { detailPowerInfo = Pair(it, PlayerSide.BLACK) },
+                    onShowPowerInfo = { detailPowerInfo = Pair(it, topPlayer) },
                     onOpenGraveyard = { showGraveyardModal = true },
-                    timeMillis = blackTimeMillis,
+                    timeMillis = topTimeMillis,
                     isTimed = currentTimeControl.isTimed,
-                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == PlayerSide.BLACK && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
+                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == topPlayer && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
                     mirrored = (gameMode == GameMode.PASS_AND_PLAY)
                 )
             }
@@ -852,6 +944,7 @@ fun GameScreen(
                     theme = theme,
                     onSquareClick = { handleSquareClick(it) },
                     isFlipped = isFlipped,
+                    boardAngle = boardAngle,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -875,7 +968,7 @@ fun GameScreen(
             }
 
             // Finish Multi-Jump Combo button (Floating pill if chain capture active)
-            if (state.chainCapturePos != null && (gameMode == GameMode.PASS_AND_PLAY || state.currentTurn == PlayerSide.WHITE)) {
+            if (state.chainCapturePos != null && (gameMode == GameMode.PASS_AND_PLAY || state.currentTurn == playerSide)) {
                 Spacer(modifier = Modifier.height(3.dp))
                 androidx.compose.material3.Button(
                     onClick = {
@@ -897,19 +990,19 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // White's Superpower Bar (Always visible at bottom, upright, with live Chess Clock)
+            // Bottom Superpower Bar (Human Player in AI mode or Bottom player in Pass & Play)
             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                 SuperpowerBar(
                     state = state,
-                    player = PlayerSide.WHITE,
-                    isCurrentTurn = state.currentTurn == PlayerSide.WHITE,
-                    onPowerClick = { activatePower(it, PlayerSide.WHITE) },
+                    player = bottomPlayer,
+                    isCurrentTurn = state.currentTurn == bottomPlayer,
+                    onPowerClick = { activatePower(it, bottomPlayer) },
                     onCancelPower = { cancelActivePower() },
-                    onShowPowerInfo = { detailPowerInfo = Pair(it, PlayerSide.WHITE) },
+                    onShowPowerInfo = { detailPowerInfo = Pair(it, bottomPlayer) },
                     onOpenGraveyard = { showGraveyardModal = true },
-                    timeMillis = whiteTimeMillis,
+                    timeMillis = bottomTimeMillis,
                     isTimed = currentTimeControl.isTimed,
-                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == PlayerSide.WHITE && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
+                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == bottomPlayer && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
                     mirrored = false
                 )
             }
@@ -917,13 +1010,40 @@ fun GameScreen(
 
         // Superpower Detail Dialog
         detailPowerInfo?.let { (power, forPlayer) ->
-            val isCurrentTurn = state.currentTurn == forPlayer && (gameMode != GameMode.AI || forPlayer != PlayerSide.BLACK) && !isTimerPaused && !state.isGameOver()
+            val isPlayerTurn = if (gameMode == GameMode.AI) state.currentTurn == playerSide else true
+            val isCurrentTurn = state.currentTurn == forPlayer && isPlayerTurn && !isTimerPaused && !state.isGameOver()
             PowerDetailDialog(
                 power = power,
                 isAvailable = state.remainingPowers(forPlayer).contains(power),
                 isCurrentTurn = isCurrentTurn,
                 onActivate = { activatePower(it, forPlayer) },
                 onDismiss = { detailPowerInfo = null }
+            )
+        }
+
+        // Pawn Revive Confirmation Dialog (Misclick Protection)
+        pendingPawnRevive?.let { (piece, targetPos, player) ->
+            PawnReviveConfirmDialog(
+                pieceToRevive = piece,
+                targetPos = targetPos,
+                player = player,
+                onConfirm = {
+                    val previousTurn = state.currentTurn
+                    historyStates = historyStates + state
+                    state = GameEngine.applyPawnRevival(state, targetPos)
+                    state = state.copy(
+                        isRevivingPawnMode = false,
+                        activePower = null,
+                        candidateMoves = emptyList(),
+                        selectedPos = null
+                    )
+                    applyIncrement(previousTurn)
+                    soundManager.playPowerSound()
+                    pendingPawnRevive = null
+                },
+                onDismiss = {
+                    pendingPawnRevive = null
+                }
             )
         }
 
@@ -946,6 +1066,18 @@ fun GameScreen(
                     resetMatch(newTc)
                 },
                 onDismiss = { showTimeControlDialog = false }
+            )
+        }
+
+        // Match Rules Config Modal Dialog
+        if (showRulesDialog) {
+            MatchRulesDialog(
+                currentConfig = currentRulesConfig,
+                onApply = { newConfig ->
+                    currentRulesConfig = newConfig
+                    state = state.copy(rulesConfig = newConfig)
+                },
+                onDismiss = { showRulesDialog = false }
             )
         }
 

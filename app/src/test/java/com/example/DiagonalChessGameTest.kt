@@ -9,10 +9,12 @@ import com.example.model.PlayerSide
 import com.example.model.Position
 import com.example.model.Superpower
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class DiagonalChessGameTest {
 
@@ -294,5 +296,149 @@ class DiagonalChessGameTest {
         val nextState = GameEngine.applyMove(initialState, whiteMoves.first())
         assertEquals("Move history has 1 move after first move", 1, nextState.moveHistory.size)
         assertTrue("First move is made so timer can start", nextState.moveHistory.isNotEmpty())
+    }
+
+    @Test
+    fun testStalemateDetection() {
+        // Construct a board where White has a piece that has no valid forward moves and cannot jump
+        // e.g., White piece at top corner (0, 0) trapped by Black pieces at (1, 0) and (0, 1) without landing squares
+        val customBoard = mapOf(
+            Position(0, 0) to Piece("w1", PlayerSide.WHITE),
+            Position(1, 0) to Piece("b1", PlayerSide.BLACK),
+            Position(2, 0) to Piece("b2", PlayerSide.BLACK), // Blocks jump landing
+            Position(0, 1) to Piece("b3", PlayerSide.BLACK),
+            Position(0, 2) to Piece("b4", PlayerSide.BLACK)  // Blocks jump landing
+        )
+        // White turn, no powers remaining
+        val state = GameState(
+            board = customBoard,
+            currentTurn = PlayerSide.WHITE,
+            whitePowers = emptySet(),
+            blackPowers = emptySet()
+        )
+        val whiteMoves = GameEngine.getAllLegalMoves(state)
+        assertTrue("White has 0 legal moves", whiteMoves.isEmpty())
+
+        // Win/draw condition evaluation
+        val evaluatedState = state.copy(status = GameEngine.checkWinCondition(state.board, state.currentTurn))
+        assertEquals(GameStatus.DRAW_STALEMATE, evaluatedState.status)
+        assertTrue(evaluatedState.isGameOver())
+        assertTrue(evaluatedState.status.isDraw)
+    }
+
+    @Test
+    fun testThreefoldRepetitionDetection() {
+        // Setup two pieces moving back and forth
+        val p1 = Position(3, 3)
+        val p2 = Position(2, 3)
+        val customBoard = mapOf(
+            Position(3, 3) to Piece("w1", PlayerSide.WHITE, isQueen = true), // Queen can move back and forth
+            Position(0, 0) to Piece("b1", PlayerSide.BLACK, isQueen = true)
+        )
+        val initSig = GameState.computeSignature(customBoard, PlayerSide.WHITE, emptySet(), emptySet(), null, 0)
+        var state = GameState(
+            board = customBoard,
+            currentTurn = PlayerSide.WHITE,
+            whitePowers = emptySet(),
+            blackPowers = emptySet(),
+            positionHistory = listOf(initSig)
+        )
+
+        // Make repeated queen oscillate moves
+        // 1. White moves (3,3) -> (2,3)
+        val m1 = Move(from = Position(3, 3), to = Position(2, 3), piece = state.board[Position(3, 3)]!!)
+        state = GameEngine.applyMove(state, m1)
+
+        // 2. Black moves (0,0) -> (1,0)
+        val m2 = Move(from = Position(0, 0), to = Position(1, 0), piece = state.board[Position(0, 0)]!!)
+        state = GameEngine.applyMove(state, m2)
+
+        // 3. White moves (2,3) -> (3,3) (State 1 repeats 2nd time)
+        val m3 = Move(from = Position(2, 3), to = Position(3, 3), piece = state.board[Position(2, 3)]!!)
+        state = GameEngine.applyMove(state, m3)
+
+        // 4. Black moves (1,0) -> (0,0) (Initial position repeated 2nd time)
+        val m4 = Move(from = Position(1, 0), to = Position(0, 0), piece = state.board[Position(1, 0)]!!)
+        state = GameEngine.applyMove(state, m4)
+
+        // 5. White moves (3,3) -> (2,3)
+        val m5 = Move(from = Position(3, 3), to = Position(2, 3), piece = state.board[Position(3, 3)]!!)
+        state = GameEngine.applyMove(state, m5)
+
+        // 6. Black moves (0,0) -> (1,0)
+        val m6 = Move(from = Position(0, 0), to = Position(1, 0), piece = state.board[Position(0, 0)]!!)
+        state = GameEngine.applyMove(state, m6)
+
+        // 7. White moves (2,3) -> (3,3) (State 1 repeats 3rd time)
+        val m7 = Move(from = Position(2, 3), to = Position(3, 3), piece = state.board[Position(2, 3)]!!)
+        state = GameEngine.applyMove(state, m7)
+
+        // 8. Black moves (1,0) -> (0,0) (Initial position repeated 3rd time -> Repetition Draw triggered!)
+        val m8 = Move(from = Position(1, 0), to = Position(0, 0), piece = state.board[Position(1, 0)]!!)
+        state = GameEngine.applyMove(state, m8)
+
+        assertEquals(GameStatus.DRAW_REPETITION, state.status)
+        assertTrue(state.isGameOver())
+        assertTrue(state.status.isDraw)
+    }
+
+    @Test
+    fun testBoardAngleEnumProperties() {
+        val angle45 = com.example.model.BoardAngle.DIAMOND_45
+        val angle0 = com.example.model.BoardAngle.GRID_0
+
+        assertEquals("45°", angle45.shortLabel)
+        assertEquals("0°", angle0.shortLabel)
+        assertEquals("45° Diamond Arena", angle45.title)
+        assertEquals("0° Square Grid", angle0.title)
+        assertEquals(com.example.model.BoardAngle.GRID_0, angle45.toggle())
+        assertEquals(com.example.model.BoardAngle.DIAMOND_45, angle0.toggle())
+    }
+
+    @Test
+    fun testPawnReviveGhostExpiresAfterPlayerMakesAnotherMove() {
+        // Setup: Black piece at (2, 4), White pieces at (3, 4) and (5, 5).
+        // Black captures White piece at (3, 4) landing on (4, 4).
+        val customBoard = mapOf(
+            Position(2, 4) to Piece("b1", PlayerSide.BLACK),
+            Position(3, 4) to Piece("w1", PlayerSide.WHITE),
+            Position(5, 5) to Piece("w2", PlayerSide.WHITE)
+        )
+        val state = GameState(board = customBoard, currentTurn = PlayerSide.BLACK)
+        val blackMoves = GameEngine.getLegalMovesForPosition(state, Position(2, 4))
+        val captureMove = blackMoves.find { it.to == Position(4, 4) && it.capturedPiece?.id == "w1" }
+        assertNotNull(captureMove)
+
+        val stateAfterCapture = GameEngine.applyMove(state, captureMove!!)
+        // Turn is now White. White has not made any moves since the capture.
+        assertEquals(PlayerSide.WHITE, stateAfterCapture.currentTurn)
+        assertTrue("White is legally allowed to revive right now", GameEngine.canRevivePawn(stateAfterCapture, PlayerSide.WHITE))
+
+        // White decides NOT to revive and instead plays a normal move with piece w2 from (5,5) to (4,5)
+        val whitePiece = stateAfterCapture.board[Position(5, 5)]!!
+        val whiteMove = Move(from = Position(5, 5), to = Position(4, 5), piece = whitePiece)
+        val stateAfterWhiteMove = GameEngine.applyMove(stateAfterCapture, whiteMove)
+
+        // Turn is now Black's. White played another move, so White can no longer revive piece w1!
+        assertEquals(PlayerSide.BLACK, stateAfterWhiteMove.currentTurn)
+        assertFalse("White can no longer revive after playing another move", GameEngine.canRevivePawn(stateAfterWhiteMove, PlayerSide.WHITE))
+    }
+
+    @Test
+    fun testAllLossConditionStepsSelectable() {
+        // Test step positions 0..9 and rounding with float interpolations
+        val steps = 8 // intermediate steps
+        val totalIntervals = steps + 1 // 9 intervals
+        val min = 0f
+        val max = 9f
+
+        for (i in 0..9) {
+            val rawFloat = min + (max - min) * (i.toFloat() / totalIntervals)
+            val selectedInt = rawFloat.roundToInt().coerceIn(0, 9)
+            assertEquals("Step $i should resolve accurately to $i", i, selectedInt)
+
+            val config = com.example.model.GameRulesConfig(lossPieceThreshold = selectedInt)
+            assertEquals(i, config.lossPieceThreshold)
+        }
     }
 }

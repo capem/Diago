@@ -234,7 +234,8 @@ object ChessAi {
     }
 
     private fun evaluateCasualPower(state: GameState, aiPlayer: PlayerSide, powers: Set<Superpower>): AiDecision? {
-        if (powers.contains(Superpower.PAWN) && state.graveyard(aiPlayer).isNotEmpty()) {
+        // PAWN Revive (Single-turn capture window): High value if legal right now
+        if (GameEngine.canRevivePawn(state, aiPlayer)) {
             val reviveSpots = GameEngine.getReviveDestinations(state, aiPlayer)
             if (reviveSpots.isNotEmpty()) {
                 return AiDecision.RevivePawn(reviveSpots.first())
@@ -399,16 +400,26 @@ object ChessAi {
 
         // 1. Regular legal moves
         val legalMoves = GameEngine.getAllLegalMoves(state)
+        val oppPieceCount = state.board.count { it.value.player == aiPlayer.opponent() }
+        val lossThreshold = state.rulesConfig.lossPieceThreshold
+        val queenDistThreshold = state.rulesConfig.queenDistanceThreshold
+
         for (m in legalMoves) {
             val afterMove = resolveMultiJumps(GameEngine.applyMove(state, m))
             var priority = 1000
 
-            if (m.capturedPiece != null) {
+            val isDecisiveWinCapture = m.capturedPiece != null && (oppPieceCount - 1 <= lossThreshold)
+            val isPromo = m.isPromotion || (!m.piece.isQueen && m.piece.player.isPromotionGoal(m.to, queenDistThreshold))
+
+            if (isDecisiveWinCapture) {
+                priority += 950_000 // Decisive winning capture!
+            } else if (m.capturedPiece != null) {
                 val victimVal = if (m.capturedPiece.isQueen) QUEEN_VAL else PAWN_VAL
                 val attackerVal = if (m.piece.isQueen) QUEEN_VAL else PAWN_VAL
                 priority += 20000 + (victimVal * 10 - attackerVal)
             }
-            if (m.isPromotion) priority += 15000
+
+            if (isPromo) priority += 15000
 
             candidates.add(RootCandidate(AiDecision.RegularMove(m), afterMove, priority))
         }
@@ -418,30 +429,38 @@ object ChessAi {
             val powers = state.remainingPowers(aiPlayer)
             val ownPieceCount = state.board.count { it.value.player == aiPlayer }
             val enemyPieceCount = state.board.count { it.value.player == aiPlayer.opponent() }
+            val ownMarginToLoss = ownPieceCount - lossThreshold
 
-            // PAWN Revive: High value if graveyard has pieces AND our piece count is low or opponent is breaking through
-            if (powers.contains(Superpower.PAWN) && state.graveyard(aiPlayer).isNotEmpty()) {
-                val lastCaptured = state.graveyard(aiPlayer).last()
+            // PAWN Revive: Must be used on the single turn following capture
+            if (GameEngine.canRevivePawn(state, aiPlayer)) {
+                val graveyard = state.graveyard(aiPlayer)
+                val lastCaptured = graveyard.last()
                 val reviveSpots = GameEngine.getReviveDestinations(state, aiPlayer)
-                // Prefer reviving when down in pieces or lastCaptured was valuable
-                if (ownPieceCount <= 5 || lastCaptured.isQueen) {
-                    for (spot in reviveSpots.take(3)) {
-                        val afterRevive = GameEngine.applyPawnRevival(state, spot)
-                        val baseScore = if (lastCaptured.isQueen) 19000 else 11000
-                        candidates.add(RootCandidate(AiDecision.RevivePawn(spot), afterRevive, baseScore))
-                    }
+
+                // High priority: single-turn window, Queen revival, low margin, or general material preservation
+                for (spot in reviveSpots.take(4)) {
+                    val afterRevive = GameEngine.applyPawnRevival(state, spot)
+                    val isSafe = isPieceProtectedFromBehind(afterRevive, spot, aiPlayer)
+                    val distToGoal = getDistanceToPromotionGoal(spot, aiPlayer, queenDistThreshold)
+
+                    var baseScore = if (lastCaptured.isQueen) 26000 else 18000
+                    if (ownMarginToLoss <= 2) baseScore += 9000 // Essential survival revival
+                    if (isSafe) baseScore += 2000
+                    baseScore += (12 - distToGoal) * 100
+
+                    candidates.add(RootCandidate(AiDecision.RevivePawn(spot), afterRevive, baseScore))
                 }
             }
 
-            // QUEEN Transform: Only transform pieces in active central positions (r+c between 4 and 8) or endgame
+            // QUEEN Transform: Only transform pieces in active central positions or close to promotion
             if (powers.contains(Superpower.QUEEN)) {
                 val candidatePawns = state.board.filter { (pos, piece) ->
                     piece.player == aiPlayer && !piece.isQueen && (state.board.size <= 8 || (pos.row + pos.col) in 4..8)
                 }.keys
                 for (pos in candidatePawns.take(3)) {
                     val afterTransform = GameEngine.applyQueenTransformation(state, pos)
-                    val advance = if (aiPlayer == PlayerSide.WHITE) (12 - (pos.row + pos.col)) else (pos.row + pos.col)
-                    val priority = 14000 + advance * 150
+                    val dist = getDistanceToPromotionGoal(pos, aiPlayer, queenDistThreshold)
+                    val priority = 16000 + (12 - dist) * 150
                     candidates.add(RootCandidate(AiDecision.QueenTransform(pos), afterTransform, priority))
                 }
             }
@@ -454,7 +473,8 @@ object ChessAi {
 
                 for (rm in captures) {
                     val afterMove = resolveMultiJumps(GameEngine.applyMove(rookState, rm))
-                    val priority = 25000 + (if (rm.capturedPiece?.isQueen == true) 3000 else 1000)
+                    val isDecisiveWin = (enemyPieceCount - 1 <= lossThreshold)
+                    val priority = if (isDecisiveWin) 980_000 else (25000 + (if (rm.capturedPiece?.isQueen == true) 3000 else 1000))
                     candidates.add(RootCandidate(AiDecision.ActivateSuperpower(Superpower.ROOK, rm), afterMove, priority))
                 }
             }
@@ -487,9 +507,9 @@ object ChessAi {
                     .filter { !state.board.containsKey(it) }
 
                 for ((from, piece) in ownPieces) {
-                    // Check if piece is in promotion row
+                    // Check if target square is in active promotion zone
                     for (to in emptySquares) {
-                        val isPromo = !piece.isQueen && piece.player.isPromotionGoal(to)
+                        val isPromo = !piece.isQueen && piece.player.isPromotionGoal(to, queenDistThreshold)
                         if (isPromo) {
                             val teleportMove = Move(
                                 from = from,
@@ -683,13 +703,16 @@ object ChessAi {
         var curAlpha = maxOf(alpha, standPat)
 
         val legalMoves = GameEngine.getAllLegalMoves(state)
-        val tacticalMoves = legalMoves.filter { it.capturedPiece != null || it.isPromotion }
+        val queenDistThreshold = state.rulesConfig.queenDistanceThreshold
+        val tacticalMoves = legalMoves.filter { 
+            it.capturedPiece != null || it.isPromotion || (!it.piece.isQueen && it.piece.player.isPromotionGoal(it.to, queenDistThreshold))
+        }
         if (tacticalMoves.isEmpty()) return standPat
 
         val sortedTactical = tacticalMoves.sortedByDescending { move ->
             val victimVal = if (move.capturedPiece?.isQueen == true) QUEEN_VAL else PAWN_VAL
             val attackerVal = if (move.piece.isQueen) QUEEN_VAL else PAWN_VAL
-            val promoBonus = if (move.isPromotion) 200 else 0
+            val promoBonus = if (move.isPromotion || (!move.piece.isQueen && move.piece.player.isPromotionGoal(move.to, queenDistThreshold))) 220 else 0
             (victimVal * 10 - attackerVal) + promoBonus
         }
 
@@ -717,16 +740,23 @@ object ChessAi {
         val ttMove = (ttDecision as? AiDecision.RegularMove)?.move
         val killer1 = if (ply < killerMoves.size) killerMoves[ply][0] else null
         val killer2 = if (ply < killerMoves.size) killerMoves[ply][1] else null
+        val oppPieces = state.board.count { it.value.player == state.currentTurn.opponent() }
+        val lossThreshold = state.rulesConfig.lossPieceThreshold
+        val queenDistThreshold = state.rulesConfig.queenDistanceThreshold
 
         return moves.sortedByDescending { m ->
+            val isDecisiveWinCapture = m.capturedPiece != null && (oppPieces - 1 <= lossThreshold)
+            val isPromo = m.isPromotion || (!m.piece.isQueen && m.piece.player.isPromotionGoal(m.to, queenDistThreshold))
+
             when {
+                isDecisiveWinCapture -> 1_200_000 // Decisive match-winning strike!
                 ttMove != null && m.from == ttMove.from && m.to == ttMove.to -> 1_000_000
                 m.capturedPiece != null -> {
                     val victim = if (m.capturedPiece.isQueen) QUEEN_VAL else PAWN_VAL
                     val attacker = if (m.piece.isQueen) QUEEN_VAL else PAWN_VAL
                     800_000 + (victim * 10 - attacker)
                 }
-                m.isPromotion -> 600_000
+                isPromo -> 600_000
                 killer1 != null && m.from == killer1.from && m.to == killer1.to -> 400_000
                 killer2 != null && m.from == killer2.from && m.to == killer2.to -> 390_000
                 else -> {
@@ -780,12 +810,12 @@ object ChessAi {
 
     /**
      * Handcrafted Static Evaluation Function (HCE) with:
+     * - Loss threshold & piece safety margins (custom lossPieceThreshold)
+     * - Queening zone proximity & directional race (custom queenDistanceThreshold)
      * - Dame/Queen value: 230 cp vs Pawn 100 cp
      * - Hanging Piece Detection (penalty for undefended jumpable pieces)
      * - Chain / Phalanx Defense Bonus (landing squares blocked by friendlies or edges)
-     * - Promotion Proximity & Advancement Race
-     * - Central Corridor Control (peak at r+c=6)
-     * - Superpower Strategic Reserve Valuation
+     * - Single-turn Pawn Revive window strategic reserve valuation
      */
     fun evaluateStatic(state: GameState, evalPlayer: PlayerSide): Int {
         if (state.status == GameStatus.WHITE_WON) {
@@ -795,10 +825,35 @@ object ChessAi {
             return if (evalPlayer == PlayerSide.BLACK) MATE_SCORE else -MATE_SCORE
         }
 
+        val lossThreshold = state.rulesConfig.lossPieceThreshold
+        val queenDistThreshold = state.rulesConfig.queenDistanceThreshold
+
+        var whitePieceCount = 0
+        var blackPieceCount = 0
+        for ((_, piece) in state.board) {
+            if (piece.player == PlayerSide.WHITE) whitePieceCount++ else blackPieceCount++
+        }
+
+        val whiteMargin = whitePieceCount - lossThreshold
+        val blackMargin = blackPieceCount - lossThreshold
+
+        if (whiteMargin <= 0 && blackMargin <= 0) return 0 // Mutual loss / draw
+        if (whiteMargin <= 0) return if (evalPlayer == PlayerSide.WHITE) -MATE_SCORE else MATE_SCORE
+        if (blackMargin <= 0) return if (evalPlayer == PlayerSide.BLACK) -MATE_SCORE else MATE_SCORE
+
         var whiteScore = 0
         var blackScore = 0
 
-        // Track vulnerable pieces for both sides
+        // Margin-to-loss scaling: Higher loss thresholds make every single unit dramatically more critical
+        val piecePreservationWeight = 110 + (lossThreshold * 25)
+        whiteScore += whiteMargin * piecePreservationWeight
+        blackScore += blackMargin * piecePreservationWeight
+
+        // Extreme survival danger when 1 piece away from elimination
+        if (whiteMargin == 1) whiteScore -= (450 + lossThreshold * 60)
+        if (blackMargin == 1) blackScore -= (450 + lossThreshold * 60)
+
+        // Track vulnerable hanging pieces for both sides
         val whiteHangingPenalty = computeHangingPenalty(state, PlayerSide.WHITE)
         val blackHangingPenalty = computeHangingPenalty(state, PlayerSide.BLACK)
 
@@ -809,11 +864,9 @@ object ChessAi {
             val isWhite = piece.player == PlayerSide.WHITE
             var valPiece = if (piece.isQueen) QUEEN_VAL else PAWN_VAL
 
-            // 1. Advancement towards opposing promotion threshold
-            // White goal: row=0 or col=0 (min distance is min(row, col))
-            // Black goal: row=6 or col=6 (min distance is 6 - max(row, col))
-            val distToGoal = if (isWhite) minOf(pos.row, pos.col) else (6 - maxOf(pos.row, pos.col))
-            val advanceBonus = (6 - distToGoal) * 8
+            // 1. Advancement towards opposing valid promotion threshold
+            val distToGoal = getDistanceToPromotionGoal(pos, piece.player, queenDistThreshold)
+            val advanceBonus = (12 - distToGoal) * 6
             valPiece += advanceBonus
 
             // 2. Central diagonal corridor control (r+c in 5..7, peak at 6)
@@ -825,22 +878,19 @@ object ChessAi {
             }
 
             // 3. Phalanx / Chain Defense: Is this piece protected from behind?
-            // For White, incoming jump attacks come from (row+1, col) or (row, col+1).
-            // Behind White piece is (row-1, col) or (row, col-1).
-            // If the behind landing square is off-board or occupied, piece is invulnerable from that angle!
             val isDefendedFromBehind = isPieceProtectedFromBehind(state, pos, piece.player)
             if (isDefendedFromBehind) {
                 valPiece += 18
             }
 
-            // 4. Promotion Threat: 1 step away from reaching border
+            // 4. Promotion Threat: 1 step away from reaching valid queening zone
             if (!piece.isQueen) {
                 if (distToGoal == 1) {
-                    valPiece += 40
+                    valPiece += 45
                 }
             } else {
                 // Dame mobility bonus (4-directional flexibility)
-                valPiece += 25
+                valPiece += 30
             }
 
             if (isWhite) {
@@ -850,11 +900,33 @@ object ChessAi {
             }
         }
 
-        // Strategic Superpower Reserve Value
-        whiteScore += evaluatePowerReserves(state.whitePowers, state.whiteGraveyard.isNotEmpty())
-        blackScore += evaluatePowerReserves(state.blackPowers, state.blackGraveyard.isNotEmpty())
+        // Strategic Superpower Reserve Value (with immediate revive window bonus)
+        val canWhiteReviveNow = GameEngine.canRevivePawn(state, PlayerSide.WHITE)
+        val canBlackReviveNow = GameEngine.canRevivePawn(state, PlayerSide.BLACK)
+        whiteScore += evaluatePowerReserves(state.whitePowers, state.whiteGraveyard.isNotEmpty(), canWhiteReviveNow)
+        blackScore += evaluatePowerReserves(state.blackPowers, state.blackGraveyard.isNotEmpty(), canBlackReviveNow)
 
         return if (evalPlayer == PlayerSide.WHITE) (whiteScore - blackScore) else (blackScore - whiteScore)
+    }
+
+    /**
+     * Compute shortest forward Manhattan steps from [pos] to any valid queening square for [player]
+     * under the active [threshold] (cells distance from apex corner).
+     */
+    fun getDistanceToPromotionGoal(pos: Position, player: PlayerSide, threshold: Int): Int {
+        val r = pos.row
+        val c = pos.col
+        return if (player == PlayerSide.WHITE) {
+            minOf(
+                r + maxOf(0, c - threshold),
+                c + maxOf(0, r - threshold)
+            )
+        } else {
+            minOf(
+                (6 - r) + maxOf(0, (6 - c) - threshold),
+                (6 - c) + maxOf(0, (6 - r) - threshold)
+            )
+        }
     }
 
     /**
@@ -902,14 +974,20 @@ object ChessAi {
         return safeAngles == forwardDirs.size
     }
 
-    private fun evaluatePowerReserves(powers: Set<Superpower>, hasGraveyard: Boolean): Int {
+    private fun evaluatePowerReserves(powers: Set<Superpower>, hasGraveyard: Boolean, canReviveNow: Boolean = false): Int {
         var total = 0
         if (powers.contains(Superpower.QUEEN)) total += 60
         if (powers.contains(Superpower.KING)) total += 55
         if (powers.contains(Superpower.ROOK)) total += 50
         if (powers.contains(Superpower.BISHOP)) total += 45
         if (powers.contains(Superpower.KNIGHT)) total += 30
-        if (powers.contains(Superpower.PAWN)) total += if (hasGraveyard) 40 else 15
+        if (powers.contains(Superpower.PAWN)) {
+            total += when {
+                canReviveNow -> 85 // Highly valuable immediately actionable superpower window!
+                hasGraveyard -> 40
+                else -> 15
+            }
+        }
         return total
     }
 }

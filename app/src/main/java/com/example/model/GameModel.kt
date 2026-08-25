@@ -47,9 +47,33 @@ enum class PlayerSide(val displayName: String) {
     fun isPromotionGoal(pos: Position): Boolean =
         if (this == WHITE) pos.row == 0 || pos.col == 0 else pos.row == 6 || pos.col == 6
 
+    fun isPromotionGoal(pos: Position, queenDistanceThreshold: Int): Boolean {
+        if (queenDistanceThreshold >= 7) {
+            return isPromotionGoal(pos)
+        }
+        val apexRow = if (this == WHITE) 0 else 6
+        val apexCol = if (this == WHITE) 0 else 6
+        // Cell is valid for queening if it lies on either border and is within queenDistanceThreshold steps from the apex corner (apexRow, apexCol)
+        return (pos.row == apexRow && kotlin.math.abs(pos.col - apexCol) <= queenDistanceThreshold) ||
+                (pos.col == apexCol && kotlin.math.abs(pos.row - apexRow) <= queenDistanceThreshold)
+    }
+
     fun isHomeTerritory(pos: Position): Boolean =
         if (this == WHITE) (pos.row + pos.col) >= 9 else (pos.row + pos.col) <= 3
 }
+
+/**
+ * Customizable match rules configuration.
+ * @param lossPieceThreshold: Player loses when their remaining pieces count falls to or below this number (default 0).
+ * @param queenDistanceThreshold: Number of cells from the enemy corner apex (0..6) where pieces can be queened (default 6 = entire border).
+ */
+data class GameRulesConfig(
+    val lossPieceThreshold: Int = 0,
+    val queenDistanceThreshold: Int = 6
+) {
+    val isDefault: Boolean get() = lossPieceThreshold == 0 && queenDistanceThreshold == 6
+}
+
 
 data class Piece(
     val id: String,
@@ -125,33 +149,83 @@ enum class AiDifficulty(val title: String, val description: String) {
     GRANDMASTER("Grandmaster", "Deep search with aggressive superpower combinations")
 }
 
-enum class TimeControl(
+enum class AiColorChoice(val title: String, val subtitle: String, val emoji: String) {
+    WHITE("White", "Move 1st", "⚪"),
+    RANDOM("Random", "50 / 50", "🎲"),
+    BLACK("Black", "AI 1st", "⚫")
+}
+
+data class TimeControl(
     val title: String,
     val subtitle: String,
     val totalSeconds: Int,
     val incrementSeconds: Int,
-    val emoji: String
+    val emoji: String,
+    val isCustom: Boolean = false
 ) {
-    UNLIMITED("No Timer", "Casual match with unlimited time", 0, 0, "∞"),
-    BULLET_1("1 min", "Bullet (1m + 0s)", 60, 0, "⚡"),
-    BULLET_1_1("1 | 1", "Bullet (1m + 1s increment)", 60, 1, "⚡"),
-    BLITZ_3("3 min", "Blitz (3m + 0s)", 180, 0, "🔥"),
-    BLITZ_3_2("3 | 2", "Blitz (3m + 2s increment)", 180, 2, "🔥"),
-    RAPID_5("5 min", "Rapid (5m + 0s)", 300, 0, "⏱️"),
-    RAPID_5_3("5 | 3", "Rapid (5m + 3s increment)", 300, 3, "⏱️"),
-    CLASSICAL_10("10 min", "Classical (10m + 0s)", 600, 0, "⏳"),
-    CLASSICAL_15("15 min", "Classical (15m + 5s increment)", 900, 5, "⏳");
-
     val isTimed: Boolean get() = totalSeconds > 0
 
     val shortBadge: String get() = when {
         !isTimed -> "∞"
         incrementSeconds > 0 -> "${totalSeconds / 60}|$incrementSeconds"
-        else -> "${totalSeconds / 60}m"
+        totalSeconds % 60 == 0 -> "${totalSeconds / 60}m"
+        else -> "${totalSeconds}s"
     }
 
     companion object {
+        val UNLIMITED = TimeControl("No Timer", "Casual match with unlimited time", 0, 0, "∞")
+        val BULLET_1 = TimeControl("1 min", "Bullet (1m + 0s)", 60, 0, "⚡")
+        val BULLET_1_1 = TimeControl("1 | 1", "Bullet (1m + 1s increment)", 60, 1, "⚡")
+        val BLITZ_3 = TimeControl("3 min", "Blitz (3m + 0s)", 180, 0, "🔥")
+        val BLITZ_3_2 = TimeControl("3 | 2", "Blitz (3m + 2s increment)", 180, 2, "🔥")
+        val RAPID_5 = TimeControl("5 min", "Rapid (5m + 0s)", 300, 0, "⏱️")
+        val RAPID_5_3 = TimeControl("5 | 3", "Rapid (5m + 3s increment)", 300, 3, "⏱️")
+        val CLASSICAL_10 = TimeControl("10 min", "Classical (10m + 0s)", 600, 0, "⏳")
+        val CLASSICAL_15 = TimeControl("15 min", "Classical (15m + 5s increment)", 900, 5, "⏳")
+
+        val entries: List<TimeControl> = listOf(
+            UNLIMITED,
+            BULLET_1,
+            BULLET_1_1,
+            BLITZ_3,
+            BLITZ_3_2,
+            RAPID_5,
+            RAPID_5_3,
+            CLASSICAL_10,
+            CLASSICAL_15
+        )
+
+        fun custom(minutes: Int, incrementSeconds: Int): TimeControl {
+            val totalSec = minutes * 60
+            val title = if (minutes == 0 && incrementSeconds == 0) "No Timer"
+            else if (minutes == 0) "${incrementSeconds}s"
+            else if (incrementSeconds > 0) "$minutes | $incrementSeconds"
+            else "$minutes min"
+
+            val subtitle = if (minutes == 0 && incrementSeconds == 0) "Custom unlimited time"
+            else if (incrementSeconds > 0) "Custom ($minutes min + ${incrementSeconds}s inc)"
+            else "Custom ($minutes min + 0s inc)"
+
+            val emoji = when {
+                minutes == 0 && incrementSeconds == 0 -> "∞"
+                minutes <= 1 -> "⚡"
+                minutes <= 4 -> "🔥"
+                minutes <= 9 -> "⏱️"
+                else -> "⏳"
+            }
+
+            return TimeControl(
+                title = title,
+                subtitle = subtitle,
+                totalSeconds = totalSec,
+                incrementSeconds = incrementSeconds,
+                emoji = emoji,
+                isCustom = true
+            )
+        }
+
         fun formatTime(millis: Long): String {
+
             if (millis <= 0) return "00:00"
             val totalSeconds = (millis + 999) / 1000 // ceiling
             val minutes = totalSeconds / 60
@@ -174,16 +248,27 @@ enum class TimeControl(
     }
 }
 
+enum class BoardAngle(val degrees: Int, val title: String, val shortLabel: String) {
+    DIAMOND_45(45, "45° Diamond Arena", "45°"),
+    GRID_0(0, "0° Square Grid", "0°");
+
+    fun toggle(): BoardAngle = if (this == DIAMOND_45) GRID_0 else DIAMOND_45
+}
+
 enum class GameStatus {
     PLAYING,
     WHITE_WON,
     BLACK_WON,
     DRAW,
+    DRAW_STALEMATE,
+    DRAW_REPETITION,
+    DRAW_AGREEMENT,
     WHITE_WON_TIMEOUT,
     BLACK_WON_TIMEOUT;
 
     val isWhiteWin: Boolean get() = this == WHITE_WON || this == WHITE_WON_TIMEOUT
     val isBlackWin: Boolean get() = this == BLACK_WON || this == BLACK_WON_TIMEOUT
+    val isDraw: Boolean get() = this == DRAW || this == DRAW_STALEMATE || this == DRAW_REPETITION || this == DRAW_AGREEMENT
     val isTimeout: Boolean get() = this == WHITE_WON_TIMEOUT || this == BLACK_WON_TIMEOUT
 }
 

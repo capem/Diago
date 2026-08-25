@@ -22,12 +22,14 @@ data class GameState(
     val kingMoveCount: Int = 0, // 0: no king power, 1: first move made, waiting for second move
     val chainCapturePos: Position? = null, // Set during multi-eating jump combos
     val moveHistory: List<Move> = emptyList(),
+    val positionHistory: List<String> = listOf(initialSignature()),
     val selectedPos: Position? = null,
     val candidateMoves: List<Move> = emptyList(),
     val isPromotingQueenMode: Boolean = false,
     val isRevivingPawnMode: Boolean = false,
     val isBishopTeleportMode: Boolean = false,
-    val announcement: String? = null
+    val announcement: String? = null,
+    val rulesConfig: com.example.model.GameRulesConfig = com.example.model.GameRulesConfig()
 ) {
     fun remainingPowers(player: PlayerSide): Set<Superpower> =
         if (player == PlayerSide.WHITE) whitePowers else blackPowers
@@ -57,6 +59,37 @@ data class GameState(
             }
             return grid
         }
+
+        fun initialSignature(): String {
+            return computeSignature(initialBoard(), PlayerSide.WHITE, Superpower.entries.toSet(), Superpower.entries.toSet(), null, 0)
+        }
+
+        fun computeSignature(
+            board: Map<Position, Piece>,
+            currentTurn: PlayerSide,
+            whitePowers: Set<Superpower>,
+            blackPowers: Set<Superpower>,
+            activePower: Superpower?,
+            kingMoveCount: Int
+        ): String {
+            val sb = StringBuilder()
+            sb.append(currentTurn.name[0]).append("|")
+            for (r in 0..6) {
+                for (c in 0..6) {
+                    val p = board[Position(r, c)]
+                    if (p != null) {
+                        sb.append(r).append(c).append(p.player.name[0]).append(if (p.isQueen) 'Q' else 'P').append(';')
+                    }
+                }
+            }
+            sb.append("|W:")
+            whitePowers.sortedBy { it.name }.forEach { sb.append(it.name[0]) }
+            sb.append("|B:")
+            blackPowers.sortedBy { it.name }.forEach { sb.append(it.name[0]) }
+            sb.append("|A:").append(activePower?.name?.get(0) ?: '-')
+            sb.append("|K:").append(kingMoveCount)
+            return sb.toString()
+        }
     }
 }
 
@@ -82,7 +115,7 @@ object GameEngine {
                 for (c in 0..6) {
                     val dest = Position(r, c)
                     if (!state.board.containsKey(dest)) {
-                        val isPromotion = !piece.isQueen && piece.player.isPromotionGoal(dest)
+                        val isPromotion = !piece.isQueen && piece.player.isPromotionGoal(dest, state.rulesConfig.queenDistanceThreshold)
                         moves.add(
                             Move(
                                 from = from,
@@ -103,6 +136,7 @@ object GameEngine {
         val isQueen = piece.isQueen
         val isRookActive = state.activePower == Superpower.ROOK
         val isKnightActive = state.activePower == Superpower.KNIGHT
+        val queenThresh = state.rulesConfig.queenDistanceThreshold
 
         // Determine diagonal movement directions in 45° rotated space
         val directions = mutableListOf<Pair<Int, Int>>()
@@ -127,7 +161,7 @@ object GameEngine {
                     val tilePiece = state.board[nextPos]
                     if (!foundEnemy) {
                         if (tilePiece == null) {
-                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos)
+                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos, queenThresh)
                             legalMoves.add(
                                 Move(
                                     from = from,
@@ -149,7 +183,7 @@ object GameEngine {
                     } else {
                         // After the enemy piece: any empty tile along the line is a legal landing square
                         if (tilePiece == null) {
-                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos)
+                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos, queenThresh)
                             legalMoves.add(
                                 Move(
                                     from = from,
@@ -174,7 +208,7 @@ object GameEngine {
                 if (stepPos.isValid) {
                     val tilePiece = state.board[stepPos]
                     if (tilePiece == null) {
-                        val isPromotion = !isQueen && piece.player.isPromotionGoal(stepPos)
+                        val isPromotion = !isQueen && piece.player.isPromotionGoal(stepPos, queenThresh)
                         legalMoves.add(
                             Move(
                                 from = from,
@@ -188,7 +222,7 @@ object GameEngine {
                         // Adjacent enemy piece: check landing square directly behind it (distance 2)
                         val landingPos = Position(from.row + dr * 2, from.col + dc * 2)
                         if (landingPos.isValid && !state.board.containsKey(landingPos)) {
-                            val isPromotion = !isQueen && piece.player.isPromotionGoal(landingPos)
+                            val isPromotion = !isQueen && piece.player.isPromotionGoal(landingPos, queenThresh)
                             legalMoves.add(
                                 Move(
                                     from = from,
@@ -217,6 +251,7 @@ object GameEngine {
         val isQueen = piece.isQueen
         val isRookActive = state.activePower == Superpower.ROOK
         val isKnightActive = state.activePower == Superpower.KNIGHT
+        val queenThresh = state.rulesConfig.queenDistanceThreshold
 
         val directions = mutableListOf<Pair<Int, Int>>()
         directions.addAll(piece.player.forwardDirections())
@@ -247,7 +282,7 @@ object GameEngine {
                         }
                     } else {
                         if (tilePiece == null) {
-                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos)
+                            val isPromotion = !isQueen && piece.player.isPromotionGoal(nextPos, queenThresh)
                             captures.add(
                                 Move(
                                     from = from,
@@ -271,7 +306,7 @@ object GameEngine {
                     if (tilePiece != null && tilePiece.player != piece.player) {
                         val landingPos = Position(from.row + dr * 2, from.col + dc * 2)
                         if (landingPos.isValid && !state.board.containsKey(landingPos)) {
-                            val isPromotion = !isQueen && piece.player.isPromotionGoal(landingPos)
+                            val isPromotion = !isQueen && piece.player.isPromotionGoal(landingPos, queenThresh)
                             captures.add(
                                 Move(
                                     from = from,
@@ -317,6 +352,28 @@ object GameEngine {
     }
 
     /**
+     * Check if a player is legally allowed to use the Pawn (Revive) superpower.
+     * Constraint: A piece can ONLY be revived on the immediate turn following its capture.
+     * If the player made any moves after the capture or the turn window passed, revival is forbidden.
+     */
+    fun canRevivePawn(state: GameState, player: PlayerSide = state.currentTurn): Boolean {
+        if (!state.remainingPowers(player).contains(Superpower.PAWN)) return false
+        val graveyard = state.graveyard(player)
+        if (graveyard.isEmpty()) return false
+
+        // Find the index of the latest move in history that captured a piece belonging to player
+        val lastCaptureIdx = state.moveHistory.indexOfLast { it.capturedPiece?.player == player }
+        if (lastCaptureIdx == -1) return false
+
+        // Check moves that occurred after that capture
+        val movesAfterCapture = state.moveHistory.subList(lastCaptureIdx + 1, state.moveHistory.size)
+        // If the player has made ANY move since the capture occurred, the turn window has passed
+        if (movesAfterCapture.any { it.piece.player == player }) return false
+
+        return true
+    }
+
+    /**
      * Valid placement squares for Pawn Revive (targets exact old place where piece was captured).
      * If the exact old place is currently occupied, falls back to home territory empty squares, then all empty squares.
      */
@@ -358,7 +415,7 @@ object GameEngine {
 
         // Move piece
         newBoard.remove(move.from)
-        val isNewlyPromoted = move.isPromotion || (!move.piece.isQueen && player.isPromotionGoal(move.to))
+        val isNewlyPromoted = move.isPromotion || (!move.piece.isQueen && player.isPromotionGoal(move.to, state.rulesConfig.queenDistanceThreshold))
         val movedPiece = if (isNewlyPromoted) move.piece.withQueen() else move.piece
         newBoard[move.to] = movedPiece
 
@@ -398,7 +455,8 @@ object GameEngine {
             currentTurn = player,
             activePower = if (isRookActive) Superpower.ROOK else null,
             whitePowers = newWhitePowers,
-            blackPowers = newBlackPowers
+            blackPowers = newBlackPowers,
+            rulesConfig = state.rulesConfig
         )
 
         val nextCaptures = if (isCapture) {
@@ -417,7 +475,7 @@ object GameEngine {
                 blackPowers = newBlackPowers,
                 whiteGraveyard = newWhiteGraveyard,
                 blackGraveyard = newBlackGraveyard,
-                status = checkWinCondition(newBoard, player),
+                status = checkWinCondition(newBoard, player, rulesConfig = state.rulesConfig),
                 activePower = if (isRookActive) Superpower.ROOK else if (isKingActive) Superpower.KING else null,
                 kingMoveCount = state.kingMoveCount,
                 chainCapturePos = move.to,
@@ -427,7 +485,8 @@ object GameEngine {
                 isPromotingQueenMode = false,
                 isRevivingPawnMode = false,
                 isBishopTeleportMode = false,
-                announcement = "⚔ Combo Jump! Piece at ${move.to.notation()} can jump again."
+                announcement = "⚔ Combo Jump! Piece at ${move.to.notation()} can jump again.",
+                rulesConfig = state.rulesConfig
             )
         }
 
@@ -456,11 +515,23 @@ object GameEngine {
         }
 
         val updatedHistory = state.moveHistory + move
-        val status = checkWinCondition(newBoard, nextTurn)
+        val nextSignature = GameState.computeSignature(
+            board = newBoard,
+            currentTurn = nextTurn,
+            whitePowers = newWhitePowers,
+            blackPowers = newBlackPowers,
+            activePower = nextActivePower,
+            kingMoveCount = nextKingCount
+        )
+        val updatedPositionHistory = state.positionHistory + nextSignature
+        val status = checkWinCondition(newBoard, nextTurn, state.positionHistory, nextSignature, rulesConfig = state.rulesConfig)
 
         val announcement = when {
             status == GameStatus.WHITE_WON -> "🏆 White claims victory!"
             status == GameStatus.BLACK_WON -> "🏆 Black claims victory!"
+            status == GameStatus.DRAW_STALEMATE -> "🤝 Stalemate! ${nextTurn.displayName} has no legal moves. Game drawn."
+            status == GameStatus.DRAW_REPETITION -> "🤝 Draw by Threefold Repetition! Same position occurred 3 times."
+            status == GameStatus.DRAW -> "🤝 Draw game!"
             nextKingCount == 1 -> "👑 King Double Move: Make your 2nd move!"
             isNewlyPromoted -> "♛ Piece promoted to Queen/Dame at enemy border!"
             move.capturedPiece != null -> "${player.displayName} captured ${opponent.displayName} piece!"
@@ -479,12 +550,14 @@ object GameEngine {
             kingMoveCount = nextKingCount,
             chainCapturePos = null,
             moveHistory = updatedHistory,
+            positionHistory = updatedPositionHistory,
             selectedPos = null,
             candidateMoves = emptyList(),
             isPromotingQueenMode = false,
             isRevivingPawnMode = false,
             isBishopTeleportMode = false,
-            announcement = announcement
+            announcement = announcement,
+            rulesConfig = state.rulesConfig
         )
     }
 
@@ -507,7 +580,24 @@ object GameEngine {
             nextTurn = opponent
         }
 
-        val status = checkWinCondition(state.board, nextTurn)
+        val nextSignature = GameState.computeSignature(
+            board = state.board,
+            currentTurn = nextTurn,
+            whitePowers = state.whitePowers,
+            blackPowers = state.blackPowers,
+            activePower = null,
+            kingMoveCount = nextKingCount
+        )
+        val updatedPositionHistory = state.positionHistory + nextSignature
+        val status = checkWinCondition(state.board, nextTurn, state.positionHistory, nextSignature, rulesConfig = state.rulesConfig)
+        val announcement = when (status) {
+            GameStatus.WHITE_WON -> "🏆 White claims victory!"
+            GameStatus.BLACK_WON -> "🏆 Black claims victory!"
+            GameStatus.DRAW_STALEMATE -> "🤝 Stalemate! ${nextTurn.displayName} has no legal moves. Game drawn."
+            GameStatus.DRAW_REPETITION -> "🤝 Draw by Threefold Repetition! Same position occurred 3 times."
+            GameStatus.DRAW -> "🤝 Draw game!"
+            else -> "${player.displayName} completed capture sequence."
+        }
         return state.copy(
             currentTurn = nextTurn,
             activePower = null,
@@ -515,8 +605,9 @@ object GameEngine {
             chainCapturePos = null,
             selectedPos = null,
             candidateMoves = emptyList(),
+            positionHistory = updatedPositionHistory,
             status = status,
-            announcement = "${player.displayName} completed capture sequence."
+            announcement = announcement
         )
     }
 
@@ -543,7 +634,25 @@ object GameEngine {
         )
 
         val nextTurn = player.opponent()
-        val status = checkWinCondition(newBoard, nextTurn)
+        val nextSignature = GameState.computeSignature(
+            board = newBoard,
+            currentTurn = nextTurn,
+            whitePowers = newWhitePowers,
+            blackPowers = newBlackPowers,
+            activePower = null,
+            kingMoveCount = 0
+        )
+        val updatedPositionHistory = state.positionHistory + nextSignature
+        val status = checkWinCondition(newBoard, nextTurn, state.positionHistory, nextSignature, rulesConfig = state.rulesConfig)
+
+        val announcement = when (status) {
+            GameStatus.WHITE_WON -> "🏆 White claims victory!"
+            GameStatus.BLACK_WON -> "🏆 Black claims victory!"
+            GameStatus.DRAW_STALEMATE -> "🤝 Stalemate! ${nextTurn.displayName} has no legal moves. Game drawn."
+            GameStatus.DRAW_REPETITION -> "🤝 Draw by Threefold Repetition! Same position occurred 3 times."
+            GameStatus.DRAW -> "🤝 Draw game!"
+            else -> "👸 ${player.displayName} transformed piece at ${targetPos.notation()} into Queen/Dame!"
+        }
 
         return GameState(
             board = newBoard,
@@ -557,20 +666,29 @@ object GameEngine {
             kingMoveCount = 0,
             chainCapturePos = null,
             moveHistory = state.moveHistory + move,
+            positionHistory = updatedPositionHistory,
             selectedPos = null,
             candidateMoves = emptyList(),
             isPromotingQueenMode = false,
             isRevivingPawnMode = false,
             isBishopTeleportMode = false,
-            announcement = "👸 ${player.displayName} transformed piece at ${targetPos.notation()} into Queen/Dame!"
+            announcement = announcement,
+            rulesConfig = state.rulesConfig
         )
     }
 
     /**
      * Executes Pawn Revive placement in the exact old place where the piece was captured (or chosen square).
+     * Constraint: Cannot revive if turn has passed or player already made a move since the capture.
      */
     fun applyPawnRevival(state: GameState, targetPos: Position? = null): GameState {
         val player = state.currentTurn
+        if (!canRevivePawn(state, player)) {
+            return state.copy(
+                announcement = "⚠️ Cannot revive: piece can only be revived on the immediate turn after it was captured!"
+            )
+        }
+
         val graveyard = state.graveyard(player)
         if (graveyard.isEmpty()) return state
 
@@ -598,9 +716,27 @@ object GameEngine {
         )
 
         val nextTurn = player.opponent()
-        val status = checkWinCondition(newBoard, nextTurn)
+        val nextSignature = GameState.computeSignature(
+            board = newBoard,
+            currentTurn = nextTurn,
+            whitePowers = newWhitePowers,
+            blackPowers = newBlackPowers,
+            activePower = null,
+            kingMoveCount = 0
+        )
+        val updatedPositionHistory = state.positionHistory + nextSignature
+        val status = checkWinCondition(newBoard, nextTurn, state.positionHistory, nextSignature, rulesConfig = state.rulesConfig)
 
         val pieceTypeLabel = if (pieceToRevive.isQueen) "Queen/Dame piece 👑" else "piece"
+        val announcement = when (status) {
+            GameStatus.WHITE_WON -> "🏆 White claims victory!"
+            GameStatus.BLACK_WON -> "🏆 Black claims victory!"
+            GameStatus.DRAW_STALEMATE -> "🤝 Stalemate! ${nextTurn.displayName} has no legal moves. Game drawn."
+            GameStatus.DRAW_REPETITION -> "🤝 Draw by Threefold Repetition! Same position occurred 3 times."
+            GameStatus.DRAW -> "🤝 Draw game!"
+            else -> "♟ ${player.displayName} revived $pieceTypeLabel back at exact old position ${destPos.notation()}!"
+        }
+
         return GameState(
             board = newBoard,
             currentTurn = nextTurn,
@@ -613,31 +749,52 @@ object GameEngine {
             kingMoveCount = 0,
             chainCapturePos = null,
             moveHistory = state.moveHistory + move,
+            positionHistory = updatedPositionHistory,
             selectedPos = null,
             candidateMoves = emptyList(),
             isPromotingQueenMode = false,
             isRevivingPawnMode = false,
             isBishopTeleportMode = false,
-            announcement = "♟ ${player.displayName} revived $pieceTypeLabel back at exact old position ${destPos.notation()}!"
+            announcement = announcement,
+            rulesConfig = state.rulesConfig
         )
     }
 
     /**
-     * Checks if either side has won (all opponent pieces captured or no legal moves).
+     * Checks if either side has won (all opponent pieces captured or piece threshold reached) or if game is drawn (stalemate or repetition).
      */
-    fun checkWinCondition(board: Map<Position, Piece>, nextTurnPlayer: PlayerSide): GameStatus {
-        val whitePieces = board.values.filter { it.player == PlayerSide.WHITE }
-        val blackPieces = board.values.filter { it.player == PlayerSide.BLACK }
+    fun checkWinCondition(
+        board: Map<Position, Piece>,
+        nextTurnPlayer: PlayerSide,
+        positionHistory: List<String> = emptyList(),
+        currentSignature: String? = null,
+        rulesConfig: com.example.model.GameRulesConfig = com.example.model.GameRulesConfig()
+    ): GameStatus {
+        val whitePiecesCount = board.values.count { it.player == PlayerSide.WHITE }
+        val blackPiecesCount = board.values.count { it.player == PlayerSide.BLACK }
+        val lossThreshold = rulesConfig.lossPieceThreshold
 
-        if (whitePieces.isEmpty()) return GameStatus.BLACK_WON
-        if (blackPieces.isEmpty()) return GameStatus.WHITE_WON
+        val whiteLost = whitePiecesCount <= lossThreshold
+        val blackLost = blackPiecesCount <= lossThreshold
+
+        if (whiteLost && blackLost) return GameStatus.DRAW
+        if (whiteLost) return GameStatus.BLACK_WON
+        if (blackLost) return GameStatus.WHITE_WON
+
+        // Threefold repetition: if current position has occurred 3 or more times
+        if (currentSignature != null) {
+            val previousOccurrences = positionHistory.count { it == currentSignature }
+            if (previousOccurrences + 1 >= 3) {
+                return GameStatus.DRAW_REPETITION
+            }
+        }
 
         // Check if nextTurnPlayer has any legal regular moves
-        val dummyState = GameState(board = board, currentTurn = nextTurnPlayer)
+        val dummyState = GameState(board = board, currentTurn = nextTurnPlayer, rulesConfig = rulesConfig)
         val legalMoves = getAllLegalMoves(dummyState)
         if (legalMoves.isEmpty()) {
-            // Player has no moves left - opponent wins
-            return if (nextTurnPlayer == PlayerSide.WHITE) GameStatus.BLACK_WON else GameStatus.WHITE_WON
+            // Player has pieces on board, but 0 legal moves: Stalemate (Draw)
+            return GameStatus.DRAW_STALEMATE
         }
 
         return GameStatus.PLAYING

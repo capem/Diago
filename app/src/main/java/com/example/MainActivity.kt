@@ -14,10 +14,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.audio.SoundManager
+import com.example.data.GameRulesStorage
 import com.example.model.AiDifficulty
 import com.example.model.BoardTheme
 import com.example.model.GameMode
@@ -71,6 +73,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun DiagonalChessApp(soundManager: SoundManager) {
+    val context = LocalContext.current
+    val rulesStorage = remember { GameRulesStorage(context) }
     var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.Home) }
     var currentTheme by remember { mutableStateOf(BoardTheme.OBSIDIAN_GOLD) }
     var isAudioMuted by remember { mutableStateOf(soundManager.isAudioMuted()) }
@@ -84,7 +88,8 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                     isAudioMuted = isAudioMuted,
                     onToggleAudio = { isAudioMuted = soundManager.toggleMute() },
                     onStartGame = { mode, diff, tc, side, rules -> currentScreen = AppScreen.Game(mode, diff, tc, side, rules) },
-                    onOpenCodex = { currentScreen = AppScreen.Codex }
+                    onOpenCodex = { currentScreen = AppScreen.Codex },
+                    rulesStorage = rulesStorage
                 )
             }
 
@@ -98,7 +103,8 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                     rulesConfig = screen.rulesConfig,
                     theme = currentTheme,
                     soundManager = soundManager,
-                    onBackToHome = { currentScreen = AppScreen.Home }
+                    onBackToHome = { currentScreen = AppScreen.Home },
+                    rulesStorage = rulesStorage
                 )
             }
 

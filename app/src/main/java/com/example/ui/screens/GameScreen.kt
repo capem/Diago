@@ -55,8 +55,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -77,6 +80,7 @@ import com.example.model.PlayerSide
 import com.example.model.Position
 import com.example.model.Superpower
 import com.example.model.TimeControl
+import com.example.data.GameRulesStorage
 import com.example.ui.components.BoardView
 import com.example.ui.components.EvaluationBar
 import com.example.ui.components.GameOverDialog
@@ -98,7 +102,8 @@ fun GameScreen(
     rulesConfig: com.example.model.GameRulesConfig = com.example.model.GameRulesConfig(),
     theme: BoardTheme,
     soundManager: SoundManager,
-    onBackToHome: () -> Unit
+    onBackToHome: () -> Unit,
+    rulesStorage: GameRulesStorage = GameRulesStorage(LocalContext.current)
 ) {
     val scope = rememberCoroutineScope()
     var currentRulesConfig by remember { mutableStateOf(rulesConfig) }
@@ -1075,6 +1080,7 @@ fun GameScreen(
                 currentConfig = currentRulesConfig,
                 onApply = { newConfig ->
                     currentRulesConfig = newConfig
+                    rulesStorage.saveRules(newConfig)
                     state = state.copy(rulesConfig = newConfig)
                 },
                 onDismiss = { showRulesDialog = false }

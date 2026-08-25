@@ -55,11 +55,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.GameRulesStorage
 import com.example.model.AiColorChoice
 import com.example.model.AiDifficulty
 import com.example.model.BoardTheme
@@ -78,13 +80,14 @@ fun HomeScreen(
     isAudioMuted: Boolean,
     onToggleAudio: () -> Unit,
     onStartGame: (GameMode, AiDifficulty?, TimeControl, PlayerSide, GameRulesConfig) -> Unit,
-    onOpenCodex: () -> Unit
+    onOpenCodex: () -> Unit,
+    rulesStorage: GameRulesStorage = GameRulesStorage(LocalContext.current)
 ) {
     var activeMode by remember { mutableStateOf(GameMode.PASS_AND_PLAY) }
     var selectedDifficulty by remember { mutableStateOf(AiDifficulty.TACTICIAN) }
     var selectedAiColor by remember { mutableStateOf(AiColorChoice.WHITE) }
     var selectedTimeControl by remember { mutableStateOf(TimeControl.RAPID_5) }
-    var rulesConfig by remember { mutableStateOf(GameRulesConfig()) }
+    var rulesConfig by remember(rulesStorage) { mutableStateOf(rulesStorage.loadRules()) }
     var showTimeControlPicker by remember { mutableStateOf(false) }
     var showRulesDialog by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
@@ -754,7 +757,10 @@ fun HomeScreen(
         if (showRulesDialog) {
             MatchRulesDialog(
                 currentConfig = rulesConfig,
-                onApply = { rulesConfig = it },
+                onApply = {
+                    rulesConfig = it
+                    rulesStorage.saveRules(it)
+                },
                 onDismiss = { showRulesDialog = false }
             )
         }

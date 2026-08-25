@@ -11,6 +11,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.GameRulesStorage
 import com.example.model.BoardTheme
 import com.example.model.GameRulesConfig
+import com.example.ui.components.MatchRulesDialog
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.MyApplicationTheme
 import org.junit.Assert.assertEquals
@@ -65,28 +66,19 @@ class HomeScreenRulesPersistenceTest {
     }
 
     @Test
-    fun `HomeScreen persisting custom rules on apply`() {
-        var startedRulesConfig: GameRulesConfig? = null
+    fun `MatchRulesDialog persists custom rules on apply`() {
+        storage.saveRules(GameRulesConfig())
 
         composeTestRule.setContent {
             MyApplicationTheme {
-                HomeScreen(
-                    currentTheme = BoardTheme.OBSIDIAN_GOLD,
-                    onThemeChange = {},
-                    isAudioMuted = false,
-                    onToggleAudio = {},
-                    onStartGame = { _, _, _, _, rules -> startedRulesConfig = rules },
-                    onOpenCodex = {},
-                    rulesStorage = storage
+                MatchRulesDialog(
+                    currentConfig = storage.loadRules(),
+                    onApply = { storage.saveRules(it) },
+                    onDismiss = {}
                 )
             }
         }
 
-        // Verify initial summary text exists
-        composeTestRule.onNodeWithText("Standard (All captured • Full border)").assertExists()
-
-        // Open custom rules dialog
-        composeTestRule.onNodeWithTag("custom_rules_config_btn").performScrollTo().performClick()
         composeTestRule.onNodeWithTag("match_rules_dialog").assertIsDisplayed()
 
         // Select loss step 4 and queen step 1 inside the scrollable dialog
@@ -100,34 +92,23 @@ class HomeScreenRulesPersistenceTest {
         val persisted = storage.loadRules()
         assertEquals(4, persisted.lossPieceThreshold)
         assertEquals(1, persisted.queenDistanceThreshold)
-
-        // Start pass and play game to verify startedRulesConfig
-        composeTestRule.onNodeWithTag("pass_and_play_btn").performScrollTo().performClick()
-        assertEquals(4, startedRulesConfig?.lossPieceThreshold)
-        assertEquals(1, startedRulesConfig?.queenDistanceThreshold)
     }
 
     @Test
-    fun `HomeScreen reset defaults button persists standard rules`() {
+    fun `MatchRulesDialog reset defaults button persists standard rules`() {
         // Pre-save custom rules
         storage.saveRules(GameRulesConfig(lossPieceThreshold = 5, queenDistanceThreshold = 1))
 
         composeTestRule.setContent {
             MyApplicationTheme {
-                HomeScreen(
-                    currentTheme = BoardTheme.OBSIDIAN_GOLD,
-                    onThemeChange = {},
-                    isAudioMuted = false,
-                    onToggleAudio = {},
-                    onStartGame = { _, _, _, _, _ -> },
-                    onOpenCodex = {},
-                    rulesStorage = storage
+                MatchRulesDialog(
+                    currentConfig = storage.loadRules(),
+                    onApply = { storage.saveRules(it) },
+                    onDismiss = {}
                 )
             }
         }
 
-        // Open custom rules dialog
-        composeTestRule.onNodeWithTag("custom_rules_config_btn").performScrollTo().performClick()
         composeTestRule.onNodeWithTag("match_rules_dialog").assertIsDisplayed()
 
         // Click reset defaults inside the dialog

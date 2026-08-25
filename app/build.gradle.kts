@@ -52,7 +52,15 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+        it.jvmArgs("-XX:+UseG1GC")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

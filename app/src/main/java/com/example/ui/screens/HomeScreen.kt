@@ -25,17 +25,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AutoStories
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
+import com.example.ui.theme.ArrowForward
+import com.example.ui.theme.AutoStories
+import com.example.ui.theme.ChevronRight
+import com.example.ui.theme.People
+import com.example.ui.theme.SmartToy
+import com.example.ui.theme.Timer
+import com.example.ui.theme.Tune
+import com.example.ui.theme.VolumeMute
+import com.example.ui.theme.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -178,7 +177,7 @@ fun HomeScreen(
                             .testTag("audio_toggle_btn")
                     ) {
                         Icon(
-                            imageVector = if (isAudioMuted) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
+                            imageVector = if (isAudioMuted) Icons.AutoMirrored.Filled.VolumeMute else Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = "Audio Toggle",
                             tint = if (isAudioMuted) Color.White.copy(alpha = 0.4f) else currentTheme.accent,
                             modifier = Modifier.size(18.dp)

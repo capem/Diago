@@ -21,9 +21,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Tune
+import com.example.ui.theme.Remove
+import com.example.ui.theme.RestartAlt
+import com.example.ui.theme.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon

@@ -71,6 +71,21 @@ class SoundManager {
         }
     }
 
+    fun playLowTimeTick() {
+        if (isMuted) return
+        scope.launch {
+            playTone(pitch = 880.0, durationMs = 25, volume = 0.2f, decay = true)
+        }
+    }
+
+    fun playTimeoutBuzzer() {
+        if (isMuted) return
+        scope.launch {
+            playTone(pitch = 220.0, durationMs = 200, volume = 0.45f, decay = true)
+            playTone(pitch = 164.81, durationMs = 350, volume = 0.4f, decay = true)
+        }
+    }
+
     private fun playTone(pitch: Double, durationMs: Int, volume: Float = 0.4f, decay: Boolean = false) {
         try {
             val sampleRate = 44100

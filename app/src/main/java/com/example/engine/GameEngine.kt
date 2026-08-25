@@ -405,6 +405,8 @@ object GameEngine {
             getRawCapturesForPosition(continuationState, move.to, movedPiece)
         } else emptyList()
 
+        val isKingActive = (state.activePower == Superpower.KING || move.superpowerUsed == Superpower.KING || state.kingMoveCount == 1)
+
         if (nextCaptures.isNotEmpty()) {
             // MULTI-JUMP CHAIN: Player continues turn with subsequent jump
             val updatedHistory = state.moveHistory + move
@@ -416,7 +418,7 @@ object GameEngine {
                 whiteGraveyard = newWhiteGraveyard,
                 blackGraveyard = newBlackGraveyard,
                 status = checkWinCondition(newBoard, player),
-                activePower = if (isRookActive) Superpower.ROOK else null,
+                activePower = if (isRookActive) Superpower.ROOK else if (isKingActive) Superpower.KING else null,
                 kingMoveCount = state.kingMoveCount,
                 chainCapturePos = move.to,
                 moveHistory = updatedHistory,
@@ -433,8 +435,6 @@ object GameEngine {
         var nextKingCount = state.kingMoveCount
         var nextTurn = player
         var nextActivePower: Superpower? = null
-
-        val isKingActive = (state.activePower == Superpower.KING || move.superpowerUsed == Superpower.KING || state.kingMoveCount == 1)
 
         if (isKingActive) {
             if (state.kingMoveCount == 0) {
@@ -499,7 +499,10 @@ object GameEngine {
         var nextKingCount = state.kingMoveCount
         var nextTurn = opponent
 
-        if (state.kingMoveCount == 1) {
+        if (state.activePower == Superpower.KING && state.kingMoveCount == 0) {
+            nextKingCount = 1
+            nextTurn = player
+        } else if (state.kingMoveCount == 1) {
             nextKingCount = 0
             nextTurn = opponent
         }
@@ -575,7 +578,7 @@ object GameEngine {
         val destPos = targetPos ?: lastCaptured.capturedAt ?: getReviveDestinations(state, player).firstOrNull() ?: return state
         if (state.board.containsKey(destPos)) return state
 
-        val pieceToRevive = lastCaptured.copy(isRevived = true, isQueen = false, capturedAt = null)
+        val pieceToRevive = lastCaptured.copy(isRevived = true, isQueen = lastCaptured.isQueen, capturedAt = null)
         val newGraveyard = graveyard.dropLast(1)
         val newBoard = state.board.toMutableMap()
         newBoard[destPos] = pieceToRevive
@@ -597,6 +600,7 @@ object GameEngine {
         val nextTurn = player.opponent()
         val status = checkWinCondition(newBoard, nextTurn)
 
+        val pieceTypeLabel = if (pieceToRevive.isQueen) "Queen/Dame piece 👑" else "piece"
         return GameState(
             board = newBoard,
             currentTurn = nextTurn,
@@ -614,7 +618,7 @@ object GameEngine {
             isPromotingQueenMode = false,
             isRevivingPawnMode = false,
             isBishopTeleportMode = false,
-            announcement = "♟ ${player.displayName} revived piece back at exact old position ${destPos.notation()}!"
+            announcement = "♟ ${player.displayName} revived $pieceTypeLabel back at exact old position ${destPos.notation()}!"
         )
     }
 

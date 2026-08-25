@@ -165,3 +165,112 @@ fun PieceView(
         }
     }
 }
+
+/**
+ * Renders an ethereal, glowing translucent ghost/corpse of the latest captured piece
+ * on the exact square where it fell, visible when the player has the Pawn (Revive) superpower.
+ */
+@Composable
+fun GhostPieceCorpseView(
+    piece: Piece,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ghost_corpse_anim")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.52f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "corpse_alpha"
+    )
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "corpse_scale"
+    )
+
+    val isWhite = piece.player == PlayerSide.WHITE
+
+    Box(
+        modifier = modifier.size(54.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = (size.minDimension / 2f - 2.dp.toPx()) * pulseScale
+
+            // 1. Ethereal Emerald Soul Halo (Pawn revival color)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF00E676).copy(alpha = pulseAlpha * 0.85f),
+                        Color(0xFF00E676).copy(alpha = pulseAlpha * 0.35f),
+                        Color.Transparent
+                    ),
+                    center = center,
+                    radius = radius * 1.35f
+                ),
+                radius = radius * 1.35f,
+                center = center
+            )
+
+            // 2. Faint Ghostly Checker Body
+            val baseColors = if (isWhite) {
+                listOf(
+                    Color(0xFFFAF0E6).copy(alpha = pulseAlpha * 0.95f),
+                    Color(0xFFE0D0C0).copy(alpha = pulseAlpha * 0.80f),
+                    Color(0xFF8F7662).copy(alpha = pulseAlpha * 0.50f)
+                )
+            } else {
+                listOf(
+                    Color(0xFF5A4D73).copy(alpha = pulseAlpha * 0.95f),
+                    Color(0xFF2E2342).copy(alpha = pulseAlpha * 0.80f),
+                    Color(0xFF140F20).copy(alpha = pulseAlpha * 0.50f)
+                )
+            }
+
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = baseColors,
+                    center = Offset(center.x - radius * 0.2f, center.y - radius * 0.2f),
+                    radius = radius * 1.1f
+                ),
+                radius = radius,
+                center = center
+            )
+
+            // 3. Glowing Emerald Revival Border
+            drawCircle(
+                color = Color(0xFF00E676).copy(alpha = (pulseAlpha * 1.3f).coerceAtMost(0.9f)),
+                radius = radius * 0.88f,
+                center = center,
+                style = Stroke(width = 1.6.dp.toPx())
+            )
+        }
+
+        // 4. Ghost Insignia (Crown for Queened piece or Pawn Soul symbol)
+        if (piece.isQueen) {
+            Text(
+                text = "♛",
+                color = Color(0xFFFFD700).copy(alpha = (pulseAlpha * 1.8f).coerceAtMost(0.95f)),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else {
+            Text(
+                text = "♟",
+                color = Color(0xFF00E676).copy(alpha = (pulseAlpha * 1.8f).coerceAtMost(0.95f)),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+    }
+}

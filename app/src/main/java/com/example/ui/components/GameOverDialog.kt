@@ -45,9 +45,14 @@ fun GameOverDialog(
     onRematch: () -> Unit,
     onHome: () -> Unit
 ) {
-    val isWhiteWinner = status == GameStatus.WHITE_WON
+    val isWhiteWinner = status.isWhiteWin
     val winnerName = if (isWhiteWinner) "White" else "Black"
     val winnerColor = if (isWhiteWinner) Color(0xFFFFD700) else Color(0xFF00E5FF)
+    val subtitleText = when {
+        status.isTimeout -> "Victorious on Time! ⏱️ Opponent ran out of clock."
+        status == GameStatus.DRAW -> "Stalemate / Draw! No remaining legal moves."
+        else -> "Checkmate by Elimination & Board Domination"
+    }
 
     Dialog(onDismissRequest = { /* Modal */ }) {
         Surface(
@@ -84,7 +89,7 @@ fun GameOverDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "$winnerName Wins!",
+                    text = if (status == GameStatus.DRAW) "Draw Game!" else "$winnerName Wins!",
                     color = Color.White,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Black,
@@ -92,7 +97,7 @@ fun GameOverDialog(
                 )
 
                 Text(
-                    text = "Checkmate by Elimination & Board Control",
+                    text = subtitleText,
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,

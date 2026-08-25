@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,8 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -22,12 +25,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.VolumeMute
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Undo
-import androidx.compose.material.icons.filled.VolumeMute
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,11 +75,14 @@ import com.example.model.Piece
 import com.example.model.PlayerSide
 import com.example.model.Position
 import com.example.model.Superpower
+import com.example.model.TimeControl
 import com.example.ui.components.BoardView
+import com.example.ui.components.EvaluationBar
 import com.example.ui.components.GameOverDialog
-import com.example.ui.components.GraveyardView
+import com.example.ui.components.GraveyardModalDialog
 import com.example.ui.components.PowerDetailDialog
 import com.example.ui.components.SuperpowerBar
+import com.example.ui.components.TimeControlDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -76,23 +90,49 @@ import kotlinx.coroutines.launch
 fun GameScreen(
     gameMode: GameMode,
     aiDifficulty: AiDifficulty?,
+    timeControl: TimeControl = TimeControl.UNLIMITED,
     theme: BoardTheme,
     soundManager: SoundManager,
     onBackToHome: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var currentTimeControl by remember { mutableStateOf(timeControl) }
+    var whiteTimeMillis by remember(currentTimeControl) { mutableLongStateOf(currentTimeControl.totalSeconds * 1000L) }
+    var blackTimeMillis by remember(currentTimeControl) { mutableLongStateOf(currentTimeControl.totalSeconds * 1000L) }
+    var isTimerPaused by remember { mutableStateOf(false) }
+    var showTimeControlDialog by remember { mutableStateOf(false) }
+
     var state by remember { mutableStateOf(GameState()) }
     var historyStates by remember { mutableStateOf(listOf<GameState>()) }
     var isFlipped by remember { mutableStateOf(false) }
-    var detailPower by remember { mutableStateOf<Superpower?>(null) }
+    var detailPowerInfo by remember { mutableStateOf<Pair<Superpower, PlayerSide>?>(null) }
     var isAiThinking by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(soundManager.isAudioMuted()) }
+    var showGraveyardModal by remember { mutableStateOf(false) }
+    var showEvalBar by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+
+    fun applyIncrement(player: PlayerSide) {
+        if (currentTimeControl.incrementSeconds > 0) {
+            val addMillis = currentTimeControl.incrementSeconds * 1000L
+            if (player == PlayerSide.WHITE) {
+                whiteTimeMillis += addMillis
+            } else {
+                blackTimeMillis += addMillis
+            }
+        }
+    }
 
     // Helper: execute move
     fun executeMove(move: Move) {
+        val previousTurn = state.currentTurn
         historyStates = historyStates + state
         val nextState = GameEngine.applyMove(state, move)
         state = nextState
+
+        if (nextState.currentTurn != previousTurn) {
+            applyIncrement(previousTurn)
+        }
 
         if (move.isTeleport) {
             soundManager.playTeleportSound()
@@ -110,8 +150,10 @@ fun GameScreen(
     }
 
     // Helper: trigger superpower
-    fun activatePower(power: Superpower) {
-        val player = state.currentTurn
+    fun activatePower(power: Superpower, player: PlayerSide = state.currentTurn) {
+        if (state.isGameOver() || isAiThinking || isTimerPaused) return
+        if (player != state.currentTurn) return
+        if (gameMode == GameMode.AI && state.currentTurn == PlayerSide.BLACK) return
         val remaining = state.remainingPowers(player)
         if (!remaining.contains(power)) return
 
@@ -173,8 +215,10 @@ fun GameScreen(
                     val exactPos = lastCaptured.capturedAt
                     if (exactPos != null && !state.board.containsKey(exactPos)) {
                         // Instant revival in exact original position!
+                        val previousTurn = state.currentTurn
                         historyStates = historyStates + state
                         state = GameEngine.applyPawnRevival(state, exactPos)
+                        applyIncrement(previousTurn)
                         soundManager.playPowerSound()
                     } else {
                         val reviveSpots = GameEngine.getReviveDestinations(state, player)
@@ -220,9 +264,19 @@ fun GameScreen(
         )
     }
 
+    // Reset match helper
+    fun resetMatch(newTc: TimeControl = currentTimeControl) {
+        state = GameState()
+        historyStates = emptyList()
+        currentTimeControl = newTc
+        whiteTimeMillis = newTc.totalSeconds * 1000L
+        blackTimeMillis = newTc.totalSeconds * 1000L
+        isTimerPaused = false
+    }
+
     // Board Square Click Handler
     fun handleSquareClick(pos: Position) {
-        if (state.isGameOver() || isAiThinking) return
+        if (state.isGameOver() || isAiThinking || isTimerPaused) return
         val currentTurn = state.currentTurn
         if (gameMode == GameMode.AI && currentTurn == PlayerSide.BLACK) return
 
@@ -241,6 +295,7 @@ fun GameScreen(
             if (piece != null && piece.player == currentTurn && !piece.isQueen) {
                 historyStates = historyStates + state
                 state = GameEngine.applyQueenTransformation(state, pos)
+                applyIncrement(currentTurn)
                 soundManager.playQueenPromoteSound()
             }
             return
@@ -253,6 +308,7 @@ fun GameScreen(
                 if (allowedReviveSpots.contains(pos)) {
                     historyStates = historyStates + state
                     state = GameEngine.applyPawnRevival(state, pos)
+                    applyIncrement(currentTurn)
                     soundManager.playPowerSound()
                 }
             }
@@ -310,11 +366,55 @@ fun GameScreen(
         }
     }
 
+    // Time Control Countdown Engine (starts only after the first move is made)
+    LaunchedEffect(state.status, state.currentTurn, isTimerPaused, currentTimeControl, state.moveHistory.size) {
+        val isMatchStarted = state.moveHistory.isNotEmpty()
+        if (!currentTimeControl.isTimed || isTimerPaused || state.status != GameStatus.PLAYING || !isMatchStarted) return@LaunchedEffect
+
+        var lastTickSecond = -1
+        while (state.status == GameStatus.PLAYING && !isTimerPaused && currentTimeControl.isTimed && state.moveHistory.isNotEmpty()) {
+            delay(100L)
+            if (state.currentTurn == PlayerSide.WHITE) {
+                val newTime = (whiteTimeMillis - 100L).coerceAtLeast(0L)
+                whiteTimeMillis = newTime
+                val currentSec = (newTime / 1000).toInt()
+                if (newTime in 1..10_000 && currentSec != lastTickSecond) {
+                    lastTickSecond = currentSec
+                    soundManager.playLowTimeTick()
+                }
+                if (newTime <= 0L) {
+                    soundManager.playTimeoutBuzzer()
+                    state = state.copy(
+                        status = GameStatus.BLACK_WON_TIMEOUT,
+                        announcement = "⏱️ White ran out of time! Black wins."
+                    )
+                    break
+                }
+            } else {
+                val newTime = (blackTimeMillis - 100L).coerceAtLeast(0L)
+                blackTimeMillis = newTime
+                val currentSec = (newTime / 1000).toInt()
+                if (newTime in 1..10_000 && currentSec != lastTickSecond) {
+                    lastTickSecond = currentSec
+                    soundManager.playLowTimeTick()
+                }
+                if (newTime <= 0L) {
+                    soundManager.playTimeoutBuzzer()
+                    state = state.copy(
+                        status = GameStatus.WHITE_WON_TIMEOUT,
+                        announcement = "⏱️ Black ran out of time! White wins."
+                    )
+                    break
+                }
+            }
+        }
+    }
+
     // AI Turn Coroutine
-    LaunchedEffect(state.currentTurn, state.chainCapturePos, state.status) {
-        if (gameMode == GameMode.AI && state.currentTurn == PlayerSide.BLACK && state.status == GameStatus.PLAYING) {
+    LaunchedEffect(state.currentTurn, state.chainCapturePos, state.kingMoveCount, state.status, isTimerPaused) {
+        if (gameMode == GameMode.AI && state.currentTurn == PlayerSide.BLACK && state.status == GameStatus.PLAYING && !isTimerPaused) {
             isAiThinking = true
-            delay(if (state.chainCapturePos != null) 400 else 550) // Quick delay between combo jumps
+            delay(if (state.chainCapturePos != null) 350 else 500) // Quick delay between combo jumps
             val decision = ChessAi.computeNextMove(state, aiDifficulty ?: AiDifficulty.TACTICIAN)
             if (decision != null) {
                 when (decision) {
@@ -338,11 +438,13 @@ fun GameScreen(
                         soundManager.playQueenPromoteSound()
                         historyStates = historyStates + state
                         state = GameEngine.applyQueenTransformation(state, decision.pos)
+                        applyIncrement(PlayerSide.BLACK)
                     }
                     is AiDecision.RevivePawn -> {
                         soundManager.playPowerSound()
                         historyStates = historyStates + state
                         state = GameEngine.applyPawnRevival(state, decision.pos)
+                        applyIncrement(PlayerSide.BLACK)
                     }
                 }
             } else if (state.chainCapturePos != null) {
@@ -369,210 +471,481 @@ fun GameScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(top = 10.dp, bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top App Bar
+            // Top App Bar (Sleek, Pixel-Perfect 40dp Glassmorphic Action Bar)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .padding(bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onBackToHome,
-                    modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).testTag("game_back_btn")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = if (gameMode == GameMode.AI) "vs AI (${aiDifficulty?.title})" else "Pass & Play",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Turn ${state.moveHistory.size + 1}",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp
-                    )
-                }
-
-                Row {
-                    if (gameMode == GameMode.PASS_AND_PLAY) {
-                        IconButton(
-                            onClick = { isFlipped = !isFlipped },
-                            modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f))
-                        ) {
-                            Icon(Icons.Default.Flip, contentDescription = "Flip", tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-
-                    IconButton(
-                        onClick = {
-                            isMuted = soundManager.toggleMute()
-                        },
-                        modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f))
+                // Left: Back button + Mode & Turn Information
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable(onClick = onBackToHome)
+                            .testTag("game_back_btn"),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isMuted) Icons.Default.VolumeMute else Icons.Default.VolumeUp,
-                            contentDescription = "Mute",
-                            tint = if (isMuted) Color.Gray else Color(0xFFFFD700),
-                            modifier = Modifier.size(18.dp)
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                    IconButton(
-                        onClick = {
-                            if (historyStates.isNotEmpty()) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (gameMode == GameMode.AI) Color(0xFF00E5FF) else Color(0xFFFFD700))
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (gameMode == GameMode.AI) "vs AI (${aiDifficulty?.title})" else "Pass & Play",
+                                color = Color.White,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "Turn ${state.moveHistory.size + 1}",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 9.5.sp,
+                            modifier = Modifier.padding(start = 11.dp)
+                        )
+                    }
+                }
+
+                // Right: Unified Action Capsule with Uniform Sizing & Breathing Room (No Overlap)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                ) {
+                    // Time Control Quick Pill
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (currentTimeControl.isTimed) Color(0xFFFFD700).copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+                            .border(
+                                1.dp,
+                                if (currentTimeControl.isTimed) Color(0xFFFFD700).copy(alpha = 0.5f) else Color.White.copy(alpha = 0.12f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { showTimeControlDialog = true }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                            .testTag("game_tc_pill"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(currentTimeControl.emoji, fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = currentTimeControl.shortBadge,
+                                color = if (currentTimeControl.isTimed) Color(0xFFFFD700) else Color.White.copy(alpha = 0.75f),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    // Evaluation Bar Toggle Button (Vs User & Vs AI)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (showEvalBar) Color(0xFF00E5FF).copy(alpha = 0.28f)
+                                else Color.White.copy(alpha = 0.08f)
+                            )
+                            .border(
+                                width = if (showEvalBar) 1.2.dp else 0.dp,
+                                color = if (showEvalBar) Color(0xFF00E5FF) else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable { showEvalBar = !showEvalBar }
+                            .testTag("eval_bar_toggle"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "📊",
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    // Undo Move Button
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(if (historyStates.isNotEmpty()) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.03f))
+                            .clickable(enabled = historyStates.isNotEmpty()) {
                                 state = historyStates.last()
                                 historyStates = historyStates.dropLast(1)
                             }
-                        },
-                        enabled = historyStates.isNotEmpty(),
-                        modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).testTag("undo_move_btn")
+                            .testTag("undo_move_btn"),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.Undo,
+                            Icons.AutoMirrored.Filled.Undo,
                             contentDescription = "Undo",
                             tint = if (historyStates.isNotEmpty()) Color.White else Color.DarkGray,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(15.dp)
                         )
+                    }
+
+                    // More Options Dropdown Menu (Pause/Resume, Graveyard, Mute, Flip, Restart)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable { showMoreMenu = true }
+                            .testTag("more_options_btn"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "More Options",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false },
+                            modifier = Modifier
+                                .background(Color(0xFF181428))
+                                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                        ) {
+                            if (currentTimeControl.isTimed && state.status == GameStatus.PLAYING) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (isTimerPaused) "Resume Timer" else "Pause Timer",
+                                            color = if (isTimerPaused) Color(0xFF00E5FF) else Color(0xFFFFD700),
+                                            fontSize = 13.sp
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (isTimerPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                            contentDescription = null,
+                                            tint = if (isTimerPaused) Color(0xFF00E5FF) else Color(0xFFFFD700),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        isTimerPaused = !isTimerPaused
+                                        showMoreMenu = false
+                                    }
+                                )
+                            }
+
+                            val totalFallen = state.whiteGraveyard.size + state.blackGraveyard.size
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Graveyard (${totalFallen} fallen)",
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Text("💀", fontSize = 14.sp)
+                                },
+                                onClick = {
+                                    showGraveyardModal = true
+                                    showMoreMenu = false
+                                }
+                            )
+
+                            if (gameMode == GameMode.PASS_AND_PLAY) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "Flip Board",
+                                            color = Color.White,
+                                            fontSize = 13.sp
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Flip, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                    },
+                                    onClick = {
+                                        isFlipped = !isFlipped
+                                        showMoreMenu = false
+                                    }
+                                )
+                            }
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (isMuted) "Unmute Audio" else "Mute Audio",
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isMuted) Icons.AutoMirrored.Filled.VolumeMute else Icons.AutoMirrored.Filled.VolumeUp,
+                                        contentDescription = null,
+                                        tint = if (isMuted) Color.Gray else Color(0xFFFFD700),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = {
+                                    isMuted = soundManager.toggleMute()
+                                    showMoreMenu = false
+                                }
+                            )
+
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Restart Match",
+                                        color = Color(0xFFFF8A80),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFFFF8A80), modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    resetMatch(currentTimeControl)
+                                    showMoreMenu = false
+                                }
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            // Black's Superpower Bar (Visible at top, Right-side-up in vs AI mode, Mirrored only in Pass & Play)
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                SuperpowerBar(
+                    state = state,
+                    player = PlayerSide.BLACK,
+                    isCurrentTurn = state.currentTurn == PlayerSide.BLACK,
+                    onPowerClick = { activatePower(it, PlayerSide.BLACK) },
+                    onCancelPower = { cancelActivePower() },
+                    onShowPowerInfo = { detailPowerInfo = Pair(it, PlayerSide.BLACK) },
+                    onOpenGraveyard = { showGraveyardModal = true },
+                    timeMillis = blackTimeMillis,
+                    isTimed = currentTimeControl.isTimed,
+                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == PlayerSide.BLACK && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
+                    mirrored = (gameMode == GameMode.PASS_AND_PLAY)
+                )
+            }
 
-            // Opponent (Black) Superpower Bar
-            SuperpowerBar(
-                state = state,
-                player = PlayerSide.BLACK,
-                isCurrentTurn = state.currentTurn == PlayerSide.BLACK,
-                onPowerClick = { activatePower(it) },
-                onCancelPower = { cancelActivePower() },
-                onShowPowerInfo = { detailPower = it }
-            )
+            Spacer(modifier = Modifier.height(4.dp))
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Graveyard Bar
-            GraveyardView(
-                capturedWhitePieces = state.whiteGraveyard,
-                capturedBlackPieces = state.blackGraveyard,
-                activeTurn = state.currentTurn
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Turn Indicator / Thinking Banner
+            // Turn Indicator & Live Action Bar with Inline Status
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
                 shape = RoundedCornerShape(10.dp),
-                color = if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.15f) else Color(0xFF00E5FF).copy(alpha = 0.15f),
+                color = if (isTimerPaused) Color(0xFFFF9800).copy(alpha = 0.12f)
+                    else if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.10f)
+                    else Color(0xFF00E5FF).copy(alpha = 0.10f),
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.4f) else Color(0xFF00E5FF).copy(alpha = 0.4f)
+                    if (isTimerPaused) Color(0xFFFF9800).copy(alpha = 0.5f)
+                    else if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.35f)
+                    else Color(0xFF00E5FF).copy(alpha = 0.35f)
                 )
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isAiThinking) "🤖 AI is planning strategic move..." else "👉 ${state.currentTurn.displayName}'s Move",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    if (state.announcement != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text(
-                            text = state.announcement ?: "",
-                            color = Color(0xFFFFD700),
-                            fontSize = 11.sp,
-                            maxLines = 1
+                            text = if (isTimerPaused) "⏸ MATCH PAUSED"
+                                else if (isAiThinking) "🤖 AI thinking..."
+                                else "👉 ${state.currentTurn.displayName}'s Turn",
+                            color = if (isTimerPaused) Color(0xFFFFB74D) else Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (state.announcement != null) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "• ${state.announcement}",
+                                color = Color(0xFFFFD700),
+                                fontSize = 10.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (isTimerPaused) {
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { isTimerPaused = false },
+                            color = Color(0xFF00E5FF).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "▶ Resume",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    } else {
+                        // Quick info hint / timer status
+                        Text(
+                            text = if (currentTimeControl.isTimed && state.moveHistory.isEmpty()) "⏱ Starts on 1st move"
+                                else if (currentTimeControl.isTimed) "⏱ ${currentTimeControl.title}"
+                                else "Tap power for info",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 9.5.sp
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Main 7x7 Diagonal Chess Board
-            BoardView(
-                state = state,
-                theme = theme,
-                onSquareClick = { handleSquareClick(it) },
-                isFlipped = isFlipped
-            )
+            // Main 7x7 Diagonal Chess Board Container with Integrated Non-Shrinking Live Evaluation Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                contentAlignment = Alignment.Center
+            ) {
+                // Board extends edge-to-edge with zero horizontal margins
+                BoardView(
+                    state = state,
+                    theme = theme,
+                    onSquareClick = { handleSquareClick(it) },
+                    isFlipped = isFlipped,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-            // Finish Multi-Jump Combo button
-            if (state.chainCapturePos != null && (gameMode == GameMode.PASS_AND_PLAY || state.currentTurn == PlayerSide.WHITE)) {
-                Spacer(modifier = Modifier.height(8.dp))
-                androidx.compose.material3.Button(
-                    onClick = { state = GameEngine.finishMultiJump(state) },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9100)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.testTag("finish_combo_btn")
+                // Seamlessly docked Evaluation Bar in the left negative space of the board frame
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showEvalBar,
+                    enter = fadeIn() + androidx.compose.animation.slideInHorizontally { -it },
+                    exit = fadeOut() + androidx.compose.animation.slideOutHorizontally { -it },
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 8.dp)
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Finish Capture Combo", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    EvaluationBar(
+                        state = state,
+                        isFlipped = isFlipped,
+                        modifier = Modifier
+                            .height(260.dp)
+                            .testTag("game_evaluation_bar")
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Player (White) Superpower Bar
-            SuperpowerBar(
-                state = state,
-                player = PlayerSide.WHITE,
-                isCurrentTurn = state.currentTurn == PlayerSide.WHITE,
-                onPowerClick = { activatePower(it) },
-                onCancelPower = { cancelActivePower() },
-                onShowPowerInfo = { detailPower = it }
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Quick Reset Button
-            Surface(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable {
-                        state = GameState()
-                        historyStates = emptyList()
-                    }
-                    .testTag("reset_board_btn"),
-                color = Color.White.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Finish Multi-Jump Combo button (Floating pill if chain capture active)
+            if (state.chainCapturePos != null && (gameMode == GameMode.PASS_AND_PLAY || state.currentTurn == PlayerSide.WHITE)) {
+                Spacer(modifier = Modifier.height(3.dp))
+                androidx.compose.material3.Button(
+                    onClick = {
+                        val prevTurn = state.currentTurn
+                        state = GameEngine.finishMultiJump(state)
+                        if (state.currentTurn != prevTurn) {
+                            applyIncrement(prevTurn)
+                        }
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9100)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("finish_combo_btn")
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Restart Game", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Black)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Finish Capture Combo", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // White's Superpower Bar (Always visible at bottom, upright, with live Chess Clock)
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                SuperpowerBar(
+                    state = state,
+                    player = PlayerSide.WHITE,
+                    isCurrentTurn = state.currentTurn == PlayerSide.WHITE,
+                    onPowerClick = { activatePower(it, PlayerSide.WHITE) },
+                    onCancelPower = { cancelActivePower() },
+                    onShowPowerInfo = { detailPowerInfo = Pair(it, PlayerSide.WHITE) },
+                    onOpenGraveyard = { showGraveyardModal = true },
+                    timeMillis = whiteTimeMillis,
+                    isTimed = currentTimeControl.isTimed,
+                    isClockTicking = currentTimeControl.isTimed && state.currentTurn == PlayerSide.WHITE && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
+                    mirrored = false
+                )
             }
         }
 
         // Superpower Detail Dialog
-        detailPower?.let { power ->
+        detailPowerInfo?.let { (power, forPlayer) ->
+            val isCurrentTurn = state.currentTurn == forPlayer && (gameMode != GameMode.AI || forPlayer != PlayerSide.BLACK) && !isTimerPaused && !state.isGameOver()
             PowerDetailDialog(
                 power = power,
-                isAvailable = state.remainingPowers(state.currentTurn).contains(power),
-                isCurrentTurn = true,
-                onActivate = { activatePower(it) },
-                onDismiss = { detailPower = null }
+                isAvailable = state.remainingPowers(forPlayer).contains(power),
+                isCurrentTurn = isCurrentTurn,
+                onActivate = { activatePower(it, forPlayer) },
+                onDismiss = { detailPowerInfo = null }
+            )
+        }
+
+        // Graveyard & Revival Chamber Modal Dialog
+        if (showGraveyardModal) {
+            GraveyardModalDialog(
+                capturedWhitePieces = state.whiteGraveyard,
+                capturedBlackPieces = state.blackGraveyard,
+                hasWhitePawnPower = state.remainingPowers(PlayerSide.WHITE).contains(Superpower.PAWN),
+                hasBlackPawnPower = state.remainingPowers(PlayerSide.BLACK).contains(Superpower.PAWN),
+                onDismiss = { showGraveyardModal = false }
+            )
+        }
+
+        // Time Control Modal Dialog
+        if (showTimeControlDialog) {
+            TimeControlDialog(
+                currentSelection = currentTimeControl,
+                onSelect = { newTc ->
+                    resetMatch(newTc)
+                },
+                onDismiss = { showTimeControlDialog = false }
             )
         }
 
@@ -583,8 +956,7 @@ fun GameScreen(
                 moveCount = state.moveHistory.size,
                 powersUsedCount = (6 - state.whitePowers.size) + (6 - state.blackPowers.size),
                 onRematch = {
-                    state = GameState()
-                    historyStates = emptyList()
+                    resetMatch(currentTimeControl)
                 },
                 onHome = onBackToHome
             )

@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -51,10 +53,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Timer
 import com.example.model.AiDifficulty
 import com.example.model.BoardTheme
 import com.example.model.GameMode
 import com.example.model.Superpower
+import com.example.model.TimeControl
+import com.example.ui.components.TimeControlDialog
 
 @Composable
 fun HomeScreen(
@@ -62,10 +67,12 @@ fun HomeScreen(
     onThemeChange: (BoardTheme) -> Unit,
     isAudioMuted: Boolean,
     onToggleAudio: () -> Unit,
-    onStartGame: (GameMode, AiDifficulty?) -> Unit,
+    onStartGame: (GameMode, AiDifficulty?, TimeControl) -> Unit,
     onOpenCodex: () -> Unit
 ) {
     var selectedDifficulty by remember { mutableStateOf(AiDifficulty.TACTICIAN) }
+    var selectedTimeControl by remember { mutableStateOf(TimeControl.RAPID_5) }
+    var showTimeControlPicker by remember { mutableStateOf(false) }
     var showThemeMenu by remember { mutableStateOf(false) }
 
     Box(
@@ -85,7 +92,8 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = 20.dp)
+                .padding(top = 12.dp, bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top Bar with Audio & Theme Toggles
@@ -239,7 +247,115 @@ fun HomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // --- TIME CONTROL SELECTOR RIBBON ---
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(4.dp, RoundedCornerShape(16.dp)),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF161126),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.35f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Timer,
+                                contentDescription = null,
+                                tint = Color(0xFFFFD700),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "MATCH TIME CONTROL",
+                                color = Color(0xFFFFD700),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showTimeControlPicker = true }
+                                .testTag("custom_time_control_btn"),
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFFFD700).copy(alpha = 0.15f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "⚙️ Custom/More",
+                                color = Color(0xFFFFD700),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Preset Chips
+                    val presets = listOf(
+                        TimeControl.UNLIMITED,
+                        TimeControl.BULLET_1,
+                        TimeControl.BLITZ_3_2,
+                        TimeControl.RAPID_5,
+                        TimeControl.CLASSICAL_10
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        presets.forEach { tc ->
+                            val isSelected = selectedTimeControl == tc
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedTimeControl = tc }
+                                    .testTag("home_tc_${tc.name.lowercase()}"),
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color(0xFFFFD700) else Color.White.copy(alpha = 0.07f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSelected) Color(0xFFFFD700) else Color.White.copy(alpha = 0.1f)
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp, horizontal = 2.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = tc.emoji,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = tc.title,
+                                        color = if (isSelected) Color.Black else Color.White,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
 
             // --- HERO MAIN MODE: Player vs Player (Pass & Play) ---
             Surface(
@@ -275,8 +391,10 @@ fun HomeScreen(
                         }
 
                         Text(
-                            text = "⚪ vs ⚫",
-                            fontSize = 14.sp
+                            text = "⚪ vs ⚫ (${selectedTimeControl.title})",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
@@ -329,7 +447,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable { onStartGame(GameMode.PASS_AND_PLAY, null) }
+                            .clickable { onStartGame(GameMode.PASS_AND_PLAY, null, selectedTimeControl) }
                             .testTag("pass_and_play_btn"),
                         color = Color(0xFF00E5FF),
                         shape = RoundedCornerShape(12.dp)
@@ -344,7 +462,7 @@ fun HomeScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Play 2-Player Match",
+                                text = "Play 2-Player Match (${selectedTimeControl.shortBadge})",
                                 color = Color.Black,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
@@ -431,7 +549,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { onStartGame(GameMode.AI, selectedDifficulty) }
+                            .clickable { onStartGame(GameMode.AI, selectedDifficulty, selectedTimeControl) }
                             .testTag("play_ai_button"),
                         color = Color.White.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(10.dp)
@@ -444,7 +562,7 @@ fun HomeScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Battle AI (${selectedDifficulty.title})",
+                                text = "Battle AI (${selectedDifficulty.title} • ${selectedTimeControl.shortBadge})",
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -475,6 +593,14 @@ fun HomeScreen(
                 fontSize = 10.sp,
                 textAlign = TextAlign.Center,
                 lineHeight = 14.sp
+            )
+        }
+
+        if (showTimeControlPicker) {
+            TimeControlDialog(
+                currentSelection = selectedTimeControl,
+                onSelect = { selectedTimeControl = it },
+                onDismiss = { showTimeControlPicker = false }
             )
         }
     }

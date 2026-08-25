@@ -71,39 +71,31 @@ fun BoardView(
         label = "pulse_scale"
     )
 
-    // Outer Diamond Arena Frame
+    // Outer Diamond Arena Container (Edge-to-Edge full width, zero left/right margins)
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
-            .shadow(16.dp, RoundedCornerShape(20.dp))
             .testTag("diagonal_chess_board"),
-        shape = RoundedCornerShape(20.dp),
-        color = theme.boardBg,
-        border = androidx.compose.foundation.BorderStroke(
-            3.dp,
-            Brush.linearGradient(listOf(theme.accent.copy(alpha = 0.85f), theme.darkTile, theme.accent.copy(alpha = 0.4f)))
-        )
+        color = Color.Transparent
     ) {
         BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             val boardWidth = maxWidth
             val boardHeight = maxHeight
             val boardDimension = minOf(boardWidth, boardHeight)
 
-            // Step between tile centers along diagonal axes (12 steps span apex to apex + tile width)
-            val step = (boardDimension - 20.dp) / 14f
-            val tileSize = step * 1.4142f
+            // Step between tile centers along diagonal axes (14 steps span left edge to right edge completely)
+            val step = boardDimension / 14f
+            val tileSize = step * 1.41421356f
 
             // Decorative background diamond canvas
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cx = size.width / 2f
                 val cy = size.height / 2f
-                val diamondRadius = (step.toPx() * 6f) + (tileSize.toPx() / 1.4142f) + 2.dp.toPx()
+                val diamondRadius = step.toPx() * 7f
 
                 // Outer diamond perimeter
                 val diamondPath = Path().apply {
@@ -116,11 +108,11 @@ fun BoardView(
 
                 drawPath(
                     path = diamondPath,
-                    color = theme.darkTile.copy(alpha = 0.5f)
+                    color = theme.boardBg
                 )
                 drawPath(
                     path = diamondPath,
-                    color = theme.accent.copy(alpha = 0.4f),
+                    color = theme.accent.copy(alpha = 0.6f),
                     style = Stroke(width = 2.dp.toPx())
                 )
 
@@ -132,6 +124,17 @@ fun BoardView(
                     strokeWidth = 1.5.dp.toPx()
                 )
             }
+
+            // Active corpse tracking for Pawn (Revive) superpower
+            val currentTurn = state.currentTurn
+            val currentTurnHasPawn = state.remainingPowers(currentTurn).contains(Superpower.PAWN)
+            val currentTurnCorpsePiece = if (currentTurnHasPawn) state.graveyard(currentTurn).lastOrNull() else null
+            val currentTurnCorpsePos = currentTurnCorpsePiece?.capturedAt
+
+            val opponent = currentTurn.opponent()
+            val opponentHasPawn = state.remainingPowers(opponent).contains(Superpower.PAWN)
+            val opponentCorpsePiece = if (opponentHasPawn) state.graveyard(opponent).lastOrNull() else null
+            val opponentCorpsePos = opponentCorpsePiece?.capturedAt
 
             // Render all 49 diamond squares (7 rows x 7 cols)
             for (r in 0..6) {
@@ -154,6 +157,13 @@ fun BoardView(
                     val isCandidateDestination = candidateMove != null
                     val isCaptureMove = candidateMove?.capturedPiece != null
                     val piece = state.board[pos]
+
+                    // Check if square holds a faint corpse of the latest captured piece
+                    val corpsePieceToRender = when {
+                        piece == null && currentTurnCorpsePos == pos -> currentTurnCorpsePiece
+                        piece == null && opponentCorpsePos == pos -> opponentCorpsePiece
+                        else -> null
+                    }
 
                     // Diamond Tile Container
                     Box(
@@ -197,12 +207,17 @@ fun BoardView(
                                 .graphicsLayer(rotationZ = -45f),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Render Checker Piece if present
+                            // Render Checker Piece if present, or Ghost Corpse if empty & revived target
                             if (piece != null) {
                                 PieceView(
                                     piece = piece,
                                     isSelected = isSelected,
                                     modifier = Modifier.fillMaxSize(0.9f)
+                                )
+                            } else if (corpsePieceToRender != null) {
+                                GhostPieceCorpseView(
+                                    piece = corpsePieceToRender,
+                                    modifier = Modifier.fillMaxSize(0.85f)
                                 )
                             }
 

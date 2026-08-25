@@ -82,13 +82,24 @@ fun PowerDetailDialog(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                val statusText = when {
+                    !isAvailable -> "Consumed (Already Used)"
+                    !isCurrentTurn -> "One-time use (Wait for Your Turn)"
+                    else -> "One-time use (Ready to Activate)"
+                }
+                val statusColor = when {
+                    !isAvailable -> Color.Gray
+                    !isCurrentTurn -> Color(0xFFFFA726)
+                    else -> power.accentColor
+                }
+
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = power.accentColor.copy(alpha = 0.15f)
+                    color = statusColor.copy(alpha = 0.15f)
                 ) {
                     Text(
-                        text = if (isAvailable) "One-time use (Available)" else "Consumed (Already Used)",
-                        color = if (isAvailable) power.accentColor else Color.Gray,
+                        text = statusText,
+                        color = statusColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)

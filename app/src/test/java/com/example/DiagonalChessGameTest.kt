@@ -222,4 +222,77 @@ class DiagonalChessGameTest {
         assertTrue(reviveSpots.isNotEmpty())
         assertTrue(!reviveSpots.contains(Position(3, 4)))
     }
+
+    @Test
+    fun testPawnRevivalPreservesQueenedStatus() {
+        // Setup: Queened White Piece at (3, 3) is captured by Black piece jumping from (2, 3) to (4, 3)
+        val queenedWhitePiece = Piece("w_queen", PlayerSide.WHITE, isQueen = true)
+        val customBoard = mapOf(
+            Position(2, 3) to Piece("b1", PlayerSide.BLACK),
+            Position(3, 3) to queenedWhitePiece
+        )
+        val state = GameState(board = customBoard, currentTurn = PlayerSide.BLACK)
+        val blackMoves = GameEngine.getLegalMovesForPosition(state, Position(2, 3))
+        val captureMove = blackMoves.find { it.to == Position(4, 3) && it.capturedPiece?.id == "w_queen" }
+        assertNotNull(captureMove)
+        assertTrue(captureMove!!.capturedPiece!!.isQueen)
+
+        val stateAfterCapture = GameEngine.applyMove(state, captureMove)
+        // White graveyard has the captured queen
+        val capturedDeadPiece = stateAfterCapture.whiteGraveyard.first()
+        assertTrue(capturedDeadPiece.isQueen)
+        assertEquals(Position(3, 3), capturedDeadPiece.capturedAt)
+
+        // White revives piece
+        val stateAfterRevive = GameEngine.applyPawnRevival(stateAfterCapture)
+        val revivedPiece = stateAfterRevive.board[Position(3, 3)]
+        assertNotNull(revivedPiece)
+        // Verified: Revived piece keeps its Queened status!
+        assertTrue(revivedPiece!!.isQueen)
+        assertTrue(revivedPiece.isRevived)
+    }
+
+    @Test
+    fun testTimeControlPresetsAndFormatting() {
+        val tcBlitz = com.example.model.TimeControl.BLITZ_3_2
+        assertEquals(180, tcBlitz.totalSeconds)
+        assertEquals(2, tcBlitz.incrementSeconds)
+        assertTrue(tcBlitz.isTimed)
+        assertEquals("3|2", tcBlitz.shortBadge)
+
+        val tcUnlimited = com.example.model.TimeControl.UNLIMITED
+        assertEquals(0, tcUnlimited.totalSeconds)
+        assertTrue(!tcUnlimited.isTimed)
+
+        // Time format tests
+        assertEquals("03:00", com.example.model.TimeControl.formatTimePrecise(180_000L))
+        assertEquals("09.5s", com.example.model.TimeControl.formatTimePrecise(9_500L))
+        assertEquals("00:00", com.example.model.TimeControl.formatTimePrecise(0L))
+    }
+
+    @Test
+    fun testTimeoutGameOverStatus() {
+        val state = GameState(status = GameStatus.WHITE_WON_TIMEOUT)
+        assertTrue(state.isGameOver())
+        assertTrue(state.status.isWhiteWin)
+        assertTrue(state.status.isTimeout)
+
+        val stateBlack = GameState(status = GameStatus.BLACK_WON_TIMEOUT)
+        assertTrue(stateBlack.isGameOver())
+        assertTrue(stateBlack.status.isBlackWin)
+        assertTrue(stateBlack.status.isTimeout)
+    }
+
+    @Test
+    fun testFirstMoveTrackingForTimerStart() {
+        val initialState = GameState()
+        assertTrue("Initial state must have no moves made", initialState.moveHistory.isEmpty())
+
+        val whiteMoves = GameEngine.getAllLegalMoves(initialState)
+        assertTrue("White has valid opening moves", whiteMoves.isNotEmpty())
+
+        val nextState = GameEngine.applyMove(initialState, whiteMoves.first())
+        assertEquals("Move history has 1 move after first move", 1, nextState.moveHistory.size)
+        assertTrue("First move is made so timer can start", nextState.moveHistory.isNotEmpty())
+    }
 }

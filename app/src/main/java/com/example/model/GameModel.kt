@@ -125,11 +125,66 @@ enum class AiDifficulty(val title: String, val description: String) {
     GRANDMASTER("Grandmaster", "Deep search with aggressive superpower combinations")
 }
 
+enum class TimeControl(
+    val title: String,
+    val subtitle: String,
+    val totalSeconds: Int,
+    val incrementSeconds: Int,
+    val emoji: String
+) {
+    UNLIMITED("No Timer", "Casual match with unlimited time", 0, 0, "∞"),
+    BULLET_1("1 min", "Bullet (1m + 0s)", 60, 0, "⚡"),
+    BULLET_1_1("1 | 1", "Bullet (1m + 1s increment)", 60, 1, "⚡"),
+    BLITZ_3("3 min", "Blitz (3m + 0s)", 180, 0, "🔥"),
+    BLITZ_3_2("3 | 2", "Blitz (3m + 2s increment)", 180, 2, "🔥"),
+    RAPID_5("5 min", "Rapid (5m + 0s)", 300, 0, "⏱️"),
+    RAPID_5_3("5 | 3", "Rapid (5m + 3s increment)", 300, 3, "⏱️"),
+    CLASSICAL_10("10 min", "Classical (10m + 0s)", 600, 0, "⏳"),
+    CLASSICAL_15("15 min", "Classical (15m + 5s increment)", 900, 5, "⏳");
+
+    val isTimed: Boolean get() = totalSeconds > 0
+
+    val shortBadge: String get() = when {
+        !isTimed -> "∞"
+        incrementSeconds > 0 -> "${totalSeconds / 60}|$incrementSeconds"
+        else -> "${totalSeconds / 60}m"
+    }
+
+    companion object {
+        fun formatTime(millis: Long): String {
+            if (millis <= 0) return "00:00"
+            val totalSeconds = (millis + 999) / 1000 // ceiling
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            return "%02d:%02d".format(minutes, seconds)
+        }
+
+        fun formatTimePrecise(millis: Long): String {
+            if (millis <= 0) return "00:00"
+            if (millis < 10_000) {
+                val sec = millis / 1000
+                val tenth = (millis % 1000) / 100
+                return "%02d.%1ds".format(sec, tenth)
+            }
+            val totalSeconds = (millis + 999) / 1000
+            val minutes = totalSeconds / 60
+            val seconds = totalSeconds % 60
+            return "%02d:%02d".format(minutes, seconds)
+        }
+    }
+}
+
 enum class GameStatus {
     PLAYING,
     WHITE_WON,
     BLACK_WON,
-    DRAW
+    DRAW,
+    WHITE_WON_TIMEOUT,
+    BLACK_WON_TIMEOUT;
+
+    val isWhiteWin: Boolean get() = this == WHITE_WON || this == WHITE_WON_TIMEOUT
+    val isBlackWin: Boolean get() = this == BLACK_WON || this == BLACK_WON_TIMEOUT
+    val isTimeout: Boolean get() = this == WHITE_WON_TIMEOUT || this == BLACK_WON_TIMEOUT
 }
 
 data class Move(

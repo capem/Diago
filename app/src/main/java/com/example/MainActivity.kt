@@ -5,19 +5,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.audio.SoundManager
 import com.example.model.AiDifficulty
 import com.example.model.BoardTheme
 import com.example.model.GameMode
+import com.example.model.TimeControl
 import com.example.ui.screens.GameScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.RulesCodexScreen
@@ -25,7 +29,11 @@ import com.example.ui.theme.MyApplicationTheme
 
 sealed class AppScreen {
     data object Home : AppScreen()
-    data class Game(val mode: GameMode, val difficulty: AiDifficulty?) : AppScreen()
+    data class Game(
+        val mode: GameMode,
+        val difficulty: AiDifficulty?,
+        val timeControl: TimeControl = TimeControl.UNLIMITED
+    ) : AppScreen()
     data object Codex : AppScreen()
 }
 
@@ -35,11 +43,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        hideSystemBars()
         setContent {
             MyApplicationTheme {
                 DiagonalChessApp(soundManager = soundManager)
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemBars()
+        }
+    }
+
+    private fun hideSystemBars() {
+        val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
+        windowInsetsController.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        windowInsetsController.hide(WindowInsetsCompat.Type.systemBars())
     }
 }
 
@@ -49,7 +72,7 @@ fun DiagonalChessApp(soundManager: SoundManager) {
     var currentTheme by remember { mutableStateOf(BoardTheme.OBSIDIAN_GOLD) }
     var isAudioMuted by remember { mutableStateOf(soundManager.isAudioMuted()) }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    Box(modifier = Modifier.fillMaxSize()) {
         when (val screen = currentScreen) {
             is AppScreen.Home -> {
                 HomeScreen(
@@ -57,7 +80,7 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                     onThemeChange = { currentTheme = it },
                     isAudioMuted = isAudioMuted,
                     onToggleAudio = { isAudioMuted = soundManager.toggleMute() },
-                    onStartGame = { mode, diff -> currentScreen = AppScreen.Game(mode, diff) },
+                    onStartGame = { mode, diff, tc -> currentScreen = AppScreen.Game(mode, diff, tc) },
                     onOpenCodex = { currentScreen = AppScreen.Codex }
                 )
             }
@@ -67,6 +90,7 @@ fun DiagonalChessApp(soundManager: SoundManager) {
                 GameScreen(
                     gameMode = screen.mode,
                     aiDifficulty = screen.difficulty,
+                    timeControl = screen.timeControl,
                     theme = currentTheme,
                     soundManager = soundManager,
                     onBackToHome = { currentScreen = AppScreen.Home }

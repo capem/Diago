@@ -90,6 +90,7 @@ import com.example.ui.components.PawnReviveConfirmDialog
 import com.example.ui.components.PowerDetailDialog
 import com.example.ui.components.SuperpowerBar
 import com.example.ui.components.TimeControlDialog
+import com.example.ui.components.TurnIndicatorBar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -835,13 +836,19 @@ fun GameScreen(
                 }
             }
 
+            val isPassAndPlay = gameMode == GameMode.PASS_AND_PLAY
             val topPlayer = if (gameMode == GameMode.AI) playerSide.opponent() else (if (isFlipped) PlayerSide.WHITE else PlayerSide.BLACK)
             val topTimeMillis = if (topPlayer == PlayerSide.WHITE) whiteTimeMillis else blackTimeMillis
             val bottomPlayer = if (gameMode == GameMode.AI) playerSide else (if (isFlipped) PlayerSide.BLACK else PlayerSide.WHITE)
             val bottomTimeMillis = if (bottomPlayer == PlayerSide.WHITE) whiteTimeMillis else blackTimeMillis
 
-            // Top Superpower Bar (Opponent in AI mode or Top player in Pass & Play)
-            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            // Top Player Section (Opponent in AI mode or Top player in Pass & Play, mirrored for tabletop PvP)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
                 SuperpowerBar(
                     state = state,
                     player = topPlayer,
@@ -853,88 +860,22 @@ fun GameScreen(
                     timeMillis = topTimeMillis,
                     isTimed = currentTimeControl.isTimed,
                     isClockTicking = currentTimeControl.isTimed && state.currentTurn == topPlayer && state.moveHistory.isNotEmpty() && !isTimerPaused && state.status == GameStatus.PLAYING,
-                    mirrored = (gameMode == GameMode.PASS_AND_PLAY)
+                    mirrored = isPassAndPlay
+                )
+
+                TurnIndicatorBar(
+                    state = state,
+                    player = topPlayer,
+                    isCurrentTurn = state.currentTurn == topPlayer,
+                    isTimerPaused = isTimerPaused,
+                    onResumeTimer = { isTimerPaused = false },
+                    currentTimeControl = currentTimeControl,
+                    isAiThinking = isAiThinking && state.currentTurn == topPlayer,
+                    mirrored = isPassAndPlay
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Turn Indicator & Live Action Bar with Inline Status
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                shape = RoundedCornerShape(10.dp),
-                color = if (isTimerPaused) Color(0xFFFF9800).copy(alpha = 0.12f)
-                    else if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.10f)
-                    else Color(0xFF00E5FF).copy(alpha = 0.10f),
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isTimerPaused) Color(0xFFFF9800).copy(alpha = 0.5f)
-                    else if (state.currentTurn == PlayerSide.WHITE) Color(0xFFFFD700).copy(alpha = 0.35f)
-                    else Color(0xFF00E5FF).copy(alpha = 0.35f)
-                )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = if (isTimerPaused) "⏸ MATCH PAUSED"
-                                else if (isAiThinking) "🤖 AI thinking..."
-                                else "👉 ${state.currentTurn.displayName}'s Turn",
-                            color = if (isTimerPaused) Color(0xFFFFB74D) else Color.White,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (state.announcement != null) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "• ${state.announcement}",
-                                color = Color(0xFFFFD700),
-                                fontSize = 10.sp,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    if (isTimerPaused) {
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { isTimerPaused = false },
-                            color = Color(0xFF00E5FF).copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "▶ Resume",
-                                color = Color(0xFF00E5FF),
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    } else {
-                        // Quick info hint / timer status
-                        Text(
-                            text = if (currentTimeControl.isTimed && state.moveHistory.isEmpty()) "⏱ Starts on 1st move"
-                                else if (currentTimeControl.isTimed) "⏱ ${currentTimeControl.title}"
-                                else "Tap power for info",
-                            color = Color.White.copy(alpha = 0.55f),
-                            fontSize = 9.5.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             // Main 7x7 Diagonal Chess Board Container with Integrated Non-Shrinking Live Evaluation Bar
             Box(
@@ -974,7 +915,7 @@ fun GameScreen(
 
             // Finish Multi-Jump Combo button (Floating pill if chain capture active)
             if (state.chainCapturePos != null && (gameMode == GameMode.PASS_AND_PLAY || state.currentTurn == playerSide)) {
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 androidx.compose.material3.Button(
                     onClick = {
                         val prevTurn = state.currentTurn
@@ -993,10 +934,26 @@ fun GameScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
-            // Bottom Superpower Bar (Human Player in AI mode or Bottom player in Pass & Play)
-            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            // Bottom Player Section (Human Player in AI mode or Bottom player in Pass & Play)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                TurnIndicatorBar(
+                    state = state,
+                    player = bottomPlayer,
+                    isCurrentTurn = state.currentTurn == bottomPlayer,
+                    isTimerPaused = isTimerPaused,
+                    onResumeTimer = { isTimerPaused = false },
+                    currentTimeControl = currentTimeControl,
+                    isAiThinking = isAiThinking && state.currentTurn == bottomPlayer,
+                    mirrored = false
+                )
+
                 SuperpowerBar(
                     state = state,
                     player = bottomPlayer,
